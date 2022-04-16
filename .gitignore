@@ -1,6 +1,9 @@
 # Prerequisites
 *.d
 
+#.vscode files
+.vscode/*
+
 # Compiled Object files
 *.slo
 *.lo
@@ -16,6 +19,12 @@
 *.dylib
 *.dll
 
+#build
+build/*
+
+#Python env files
+env4ortcustombeamsearchoplib/*
+
 # Fortran module files
 *.mod
 *.smod
@@ -30,3 +39,6 @@
 *.exe
 *.out
 *.app
+
+#Test Files
+test/*
