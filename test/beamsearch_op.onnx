@@ -1,0 +1,18 @@
+onnxruntime.transformers:÷
+W
+	input_ids
+	num_beamslogitsCustomBeamsearchOp_0"CustomBeamsearchOp:com.microsoftTesting_CustomBeamsearchOpZ4
+	input_ids'
+%!
+
+batch_size
+sequence_lengthZ
+	num_beams
+
+
+b1
+logits'
+%!
+
+batch_size
+sequence_lengthB

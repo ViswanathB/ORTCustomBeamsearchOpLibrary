@@ -39,6 +39,3 @@ env4ortcustombeamsearchoplib/*
 *.exe
 *.out
 *.app
-
-#Test Files
-test/*

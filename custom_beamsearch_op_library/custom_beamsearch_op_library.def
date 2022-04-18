@@ -1,3 +1,3 @@
-LIBRARY "custom_beamsearch_op_library.dll"
+LIBRARY "custom_beamsearch_op_library_cpu.dll"
 EXPORTS
  RegisterCustomOps @1

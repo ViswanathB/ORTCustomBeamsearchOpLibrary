@@ -23,7 +23,7 @@ set(ORT_HEADER_SRC
 file(COPY ${ORT_HEADER_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 file(COPY ${CUSTOMBEAMSEARCHOPLIB_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
-#[[file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
+file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search.cc")
 
@@ -31,10 +31,6 @@ add_library(custom_beamsearch_op_library_cpu SHARED
     ${CMAKE_CURRENT_BINARY_DIR}/custom_beamsearch_op_library_cpu.cc
     ${CUSTOMBEAMSEARCHOPCPUIMPL_SRC}
 )
-]]
-
-add_library(custom_beamsearch_op_library_cpu SHARED
-    ${CMAKE_CURRENT_BINARY_DIR}/custom_beamsearch_op_library_cpu.cc)
 
 set(ONNXRUNTIME_CUSTOM_BEAMSEARCH_OP_LIB_LINK_FLAG "-DEF:${CUSTOMBEAMSEARCHOPLIB_ROOT}/custom_beamsearch_op_library.def")
 
