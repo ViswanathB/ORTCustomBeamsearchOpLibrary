@@ -1,5 +1,6 @@
 #include <cstdint>
 #include "beam_search.h"
+#include <iostream>
 
 using namespace std;
 
