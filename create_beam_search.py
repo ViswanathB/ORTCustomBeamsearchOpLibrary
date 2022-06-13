@@ -40,22 +40,9 @@ def make_custombeamsearchop(args):
     logits = helper.make_tensor_value_info("logits", TensorProto.INT32, ['batch_size', 'sequence_length'])
     graph_outputs = [logits]
 
-    #model = onnx.load(args.subgraph)
-    #model.graph.name = f"customsubgraph"
-
-    '''
-    inputs = ["input"]
-    input = helper.make_tensor_value_info('input', TensorProto.FLOAT, []) 
-    graph_inputs = [input]
-
-    outputs = ["output"]
-    output = helper.make_tensor_value_info("output", TensorProto.INT32, [])
-    graph_outputs = [output]
-    '''
     node = helper.make_node(model_type, inputs=inputs, outputs=outputs, name=f'{model_type}_0')
     node.domain = domain
     node.attribute.extend([
-        #helper.make_attribute("customsubgraph", model.graph),
         helper.make_attribute("model_path", "D:\\\\ai\\\\other_repos\\\\customops\\\\ORTCustomBeamsearchOpLibrary\\\\test\\\\bart_mlp_megatron_basic_test.onnx")
     ])
 
