@@ -16,8 +16,6 @@
 #include <unistd.h>
 #endif
 
-//#define PRINT_TO_CONSOLE 1
-
 static const char* c_OpDomain = "test.beamsearchop";
 
 struct OrtCustomOpDomainDeleter {
@@ -52,6 +50,10 @@ struct OrtTensorDimensions : std::vector<int64_t> {
 struct CustomBeamsearchOpKernel {
   CustomBeamsearchOpKernel(OrtApi api, const OrtKernelInfo* info)
       : api_(api), ort_(api_) {
+    // TODO move all the stuff to C++ API
+    // InitAPI() can't be called - just set the global api_ that initapi() is setting to api passed in here
+    // All other should be easy after
+    //Global<void>::api_ = &api;
     model_path_ = nullptr;
 #ifdef PRINT_TO_CONSOLE
     std::cout<<"Constructor called"<<std::endl;

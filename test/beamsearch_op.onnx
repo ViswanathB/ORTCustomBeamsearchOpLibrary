@@ -1,20 +1,0 @@
-onnxruntime.transformers:ô
-Ó
-	input_ids
-	num_beamslogitsCustomBeamsearchOp_0"CustomBeamsearchOp*v
-
-model_path"eD:\\ai\\other_repos\\customops\\ORTCustomBeamsearchOpLibrary\\test\\bart_mlp_megatron_basic_test.onnx :test.beamsearchopTesting_CustomBeamsearchOpZ4
-	input_ids'
-%!
-
-batch_size
-sequence_lengthZ
-	num_beams
-
-
-b1
-logits'
-%!
-
-batch_size
-sequence_lengthB
