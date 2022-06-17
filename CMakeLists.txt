@@ -9,6 +9,15 @@ project(customBeamsearchOPLib CXX CUDA)
 set(CUSTOMBEAMSEARCHOPLIB_ROOT ${PROJECT_SOURCE_DIR}/custom_beamsearch_op_library)
 set(ORTPACKAGE_ROOT ${CMAKE_CURRENT_BINARY_DIR}/ort_package)
 set(ORTPACKAGE_INCLUDE ${ORTPACKAGE_ROOT}/build/native/include)
+
+set (LOCAL_HEADER_SOURCE
+     "D:\\ai\\onnxruntime\\include\\onnxruntime\\core\\session\\")
+set (INCLUDE_SRC
+      "${LOCAL_HEADER_SOURCE}/onnxruntime_c_api.h"
+      "${LOCAL_HEADER_SOURCE}/onnxruntime_cxx_api.h"
+      "${LOCAL_HEADER_SOURCE}/onnxruntime_cxx_inline.h")
+file(COPY ${INCLUDE_SRC} DESTINATION ${ORTPACKAGE_INCLUDE})
+
 set(ORT_HEADER_SRC
     "${ORTPACKAGE_INCLUDE}/onnxruntime_c_api.h"
     "${ORTPACKAGE_INCLUDE}/onnxruntime_cxx_api.h"
@@ -25,7 +34,11 @@ file(COPY ${CUSTOMBEAMSEARCHOPLIB_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search.cc")
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search.cc"
+     "${CMAKE_CURRENT_BINARY_DIR}/utils.h"
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_shared.cc"
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.h"
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.cc")
 
 add_library(custom_beamsearch_op_library_cpu SHARED
     ${CMAKE_CURRENT_BINARY_DIR}/custom_beamsearch_op_library_cpu.cc

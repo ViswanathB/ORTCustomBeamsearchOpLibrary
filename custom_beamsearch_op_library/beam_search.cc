@@ -9,7 +9,7 @@ using namespace std;
 void SetBeamSearchOutputToZero(OrtKernelContext* context, Ort::CustomOpApi &ort, int batch_size, int seq_len) {
   //TODO Temp function to set the outputs of custom beam search OP to some value
   // so there is no error, this would be ideally set to 
-  std::cout<<"Setting BeamSearchOutputToZero:"<<std::endl;
+  //std::cout<<"Setting BeamSearchOutputToZero:"<<std::endl;
   const OrtValue* input_ids = ort.KernelContext_GetInput(context, 0);
 
   const OrtValue* num_ret_seqs = ort.KernelContext_GetInput(context, 4);
@@ -52,11 +52,10 @@ void SetBeamSearchOutputToZero(OrtKernelContext* context, Ort::CustomOpApi &ort,
   int64_t size2 = ort.GetTensorShapeElementCount(output_info2);
   ort.ReleaseTensorTypeAndShapeInfo(output_info2);
 
+  // TODO these values should actually be set from logits
   for (int64_t i = 0; i < size2-1; i++) {
     out2[i] = 2.0f;
   }
-  std::cout<<"Setting output to value is done"<<std::endl;
-  
 }
 
 void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort::CustomOpApi &ort, OrtSession *session) {
@@ -66,6 +65,8 @@ void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort:
   OrtMemoryInfo *ortmemoryinfo;
   // Must be freed explicitly
   api.CreateMemoryInfo("Cpu", OrtAllocatorType::OrtDeviceAllocator, 0, OrtMemType::OrtMemTypeCPU, &ortmemoryinfo);
+
+  void* thread_pool = ort.KernelContext_GetThreadPool(context);
 
   const OrtValue* input_ids_tensor = ort.KernelContext_GetInput(context, 0);
   const int* input_ids = ort.GetTensorData<int>(input_ids_tensor);
@@ -77,6 +78,12 @@ void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort:
   int64_t batch_size = tensor_shape[0];
   int64_t seq_len = tensor_shape[1];
 
+
+  // TODO, short cut to get the basic comparison with python version
+  const OrtValue* max_length_tensor = ort.KernelContext_GetInput(context, 1);
+  const int* max_length = ort.GetTensorData<int>(max_length_tensor);
+
+  int iterations = max_length[0];
 #ifdef PRINT_TO_CONSOLE
   std::cout<<"Batch_size:"<<batch_size<<std::endl;
   std::cout<<"Seq_len:"<<seq_len<<std::endl;
@@ -165,10 +172,11 @@ void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort:
         present_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_present);
     outputs.emplace_back(ort_present);
   }
-  std::cout<<"Inner session calling run"<<std::endl;
-  api.Run(session, nullptr, input_names.data(), inputs.data(), 9, output_names.data(), 7, outputs.data());
-  std::cout<<"Inner session run succesfully executed"<<std::endl;
   
+  for (int i = 0; i < iterations; i++) {
+    //std::cout<<"Running it for "<<iterations<<std::endl;
+    api.Run(session, nullptr, input_names.data(), inputs.data(), 9, output_names.data(), 7, outputs.data());
+  } 
 #ifdef PRINT_TO_CONSOLE
   std::cout<<"Printing logits"<<std::endl;
   float* logits = ort.GetTensorMutableData<float>(outputs[0]);
@@ -184,5 +192,6 @@ void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort:
     std::cout<<std::endl;
   }
 #endif
+  //TODO set this with the actual return sequences
   SetBeamSearchOutputToZero(context, ort, batch_size, seq_len);
 }

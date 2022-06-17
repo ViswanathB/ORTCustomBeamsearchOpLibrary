@@ -7,6 +7,6 @@ using namespace std;
 #include "onnxruntime_cxx_api.h"
 #undef ORT_API_MANUAL_INIT
 
-//#define PRINT_TO_CONSOLE 1
+//#define PRINT_TO_CONSOLE
 
 void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort::CustomOpApi &ort, OrtSession *session);

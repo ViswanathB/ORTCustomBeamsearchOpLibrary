@@ -5,7 +5,6 @@
 2. Successful conversion of the model to custom beam search OP using steps in [Convert Script](#convert-script). 
 3. 
 
-
 ### TBD
 This is a custom OP to run beam search over a given model. The input to the application would be input ids as shown in the ONNX model.
 However, not all the inputs are utilized?? Why do they have to be utilized?
