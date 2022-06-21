@@ -1,21 +1,17 @@
 #include "custom_beamsearch_op_library.h"
 
-#define ORT_API_MANUAL_INIT
-#include "onnxruntime_cxx_api.h"
-#undef ORT_API_MANUAL_INIT
-
 #include <vector>
 #include <cmath>
 #include <mutex>
 #include <iostream>
 #include "beam_search.h"
-#include "beam_search_parameters.h"
 #ifdef _WIN32
 #include <Windows.h>
 #else
 #include <unistd.h>
 #endif
 
+#include "beam_search_parameters.h"
 
 /* Returns the amount of milliseconds elapsed since the UNIX epoch. Works on both
  * windows and linux. */
@@ -119,8 +115,6 @@ struct CustomBeamsearchOpKernel {
   }
 
   void Compute(OrtKernelContext* context) {
-    parameters_.ParseFromInputs(context, ort_);
-
     if (session_ == nullptr && model_path_ != nullptr) {
       uint64_t s_time = GetTimeMs64();
       // The first two arguments don't matter since we are not creating the env for the first
@@ -141,7 +135,7 @@ struct CustomBeamsearchOpKernel {
     }
 
     if (model_path_ != nullptr) {
-      RunBeamSearchOnInternalSession(context, api_, ort_, session_);
+      RunBeamSearchOnInternalSession(context, api_, ort_, session_, parameters_);
     }
   }
 

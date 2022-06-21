@@ -1,10 +1,198 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 #include <cstdint>
-#include "beam_search.h"
 #include <iostream>
 
+#include "beam_search.h"
+#include "beam_search_parameters.h"
+#include "beam_search_device_helper.h"
+#include "utils.h"
+
 using namespace std;
+
+template <typename T>
+class BeamSearchImpl {
+ public:
+  BeamSearchImpl(OrtApi &api,
+                 Ort::CustomOpApi &ort,
+                 OrtKernelContext* context,
+                 //const SessionState& session_state,
+                 //GptSubgraph& gpt_subgraph,
+                 void* thread_pool,
+                 //void* cuda_stream,
+                 //IConsoleDumper* cuda_dumper,
+                 custombsop::BeamSearchParameters &params,
+                 //OrtAllocator *ort_allocator,
+                 const BeamSearchDeviceHelper::CreateInputsFunc& create_inputs_func)
+                 //const BeamSearchDeviceHelper::AddToFeedsFunc& add_to_feeds_func,
+                 //const BeamSearchDeviceHelper::TopkFunc& topk_func,
+                 //const BeamSearchDeviceHelper::ProcessLogitsFunc<T>& process_logits_func,
+                 //const BeamSearchDeviceHelper::InitBeamStateFunc<T>& init_beam_state_func,
+                 //const BeamSearchDeviceHelper::DeviceCopyFunc<float>& device_copy_func,
+                 //const BeamSearchDeviceHelper::UpdateFeedsFunc<T>& update_feeds_func)
+      : api_(api),
+        ort_(ort),
+        context_(context),
+        //session_state_(session_state),
+        //gpt_subgraph_(gpt_subgraph),
+        thread_pool_(thread_pool),
+        //implicit_inputs_(context_.GetImplicitInputs()),
+        //cuda_stream_(cuda_stream),
+        //cuda_dumper_(cuda_dumper),
+        parameters_(params),
+        //cpu_allocator_(ort_allocator),
+        //temp_space_allocator_(nullptr),
+        create_inputs_func_(create_inputs_func) {
+        //add_to_feeds_func_(add_to_feeds_func),
+        //topk_func_(topk_func),
+        //process_logits_func_(process_logits_func),
+        //init_beam_state_func_(init_beam_state_func),
+        //device_copy_func_(device_copy_func),
+        //update_feeds_func_(update_feeds_func) {
+
+    /*parameters_->ParseFromInputs(&context);
+    cpu_allocator_ = session_state.GetExecutionProviders()
+                         .Get(onnxruntime::kCpuExecutionProvider)
+                         ->GetAllocator(0, OrtMemTypeDefault);
+                         */
+    parameters_.ParseFromInputs(context, ort_);
+    parameters_.Validate(api_);
+  }
+
+  // Initialize by validating all the inputs, and allocating the output tensors.
+  OrtStatusPtr Initialize();
+
+  // Execute beam search in iterations util stopping criteria is reached.
+  // In each iteration, GPT subgraph is called, and next token for each sequence is generated.
+  //Status Execute(const FeedsFetchesManager& feeds_fetches_manager);
+  OrtStatusPtr Execute();
+
+ private:
+  //bool IsCuda() const { return cuda_stream_ != nullptr; }
+
+  // Validate inputs.
+  OrtStatusPtr CheckInputs(const OrtKernelContext& context);
+
+  // Prepare the inputs for first inference of subgraph
+  //OrtStatusPtr CreateInitialFeeds(gsl::span<int32_t>& sequence_lengths, OrtValue& expanded_input_ids, std::vector<OrtValue>& feeds, IAllocatorUniquePtr<char>& buffer);
+
+  // Update the input for next iteration.
+  /*Status UpdateFeeds(
+      const std::vector<OrtValue>& last_outputs,
+      std::vector<OrtValue>& next_inputs,
+      int current_length,
+      OrtValue& position_ids,
+      gsl::span<const int32_t> beam_next_tokens,
+      gsl::span<const int32_t> beam_indices);
+  */
+  // Process logits and append next tokens to sequences.
+  /*
+  Status GenerateNextToken(const OrtValue& logits,
+                           gsl::span<int32_t>& beam_next_tokens,
+                           gsl::span<int32_t>& beam_indices,
+                           BeamSearchState<T>& beam_state,
+                           BeamSearchCpuState& cpu_state,
+                           int counter);
+
+  // Calculate scores from logits, then apply filtering and select next token for each beam.
+  Status ProcessLogits(const OrtValue& logits,  // logits output of subgraph
+                       BeamSearchState<T>& beam_state,
+                       BeamSearchCpuState& cpu_state,
+                       AllocatorPtr& allocator,
+                       int counter);
+  */
+  //const IConsoleDumper* GetConsoleDumper() const { return IsCuda() ? cuda_dumper_ : &(cpu_dumper_); }
+
+  OrtApi api_;
+
+  Ort::CustomOpApi ort_;
+
+  OrtKernelContext* context_;
+
+  //const SessionState& session_state_;
+
+  //GptSubgraph& gpt_subgraph_;
+
+  void* thread_pool_;
+
+  //const std::vector<const OrtValue*>& implicit_inputs_;
+
+  //void* cuda_stream_;
+
+  //IConsoleDumper* cuda_dumper_;
+  //CpuTensorConsoleDumper cpu_dumper_;
+
+  custombsop::BeamSearchParameters parameters_;
+
+  //LogitsProcessorList logits_processors_;
+
+  //std::unique_ptr<BeamSearchScorer> beam_scorer_;
+
+  OrtAllocator* cpu_allocator_;
+  //AllocatorPtr temp_space_allocator_;
+
+  // Device specific functions
+  BeamSearchDeviceHelper::CreateInputsFunc create_inputs_func_;
+  //BeamSearchDeviceHelper::AddToFeedsFunc add_to_feeds_func_;
+  //BeamSearchDeviceHelper::TopkFunc topk_func_;
+  //BeamSearchDeviceHelper::ProcessLogitsFunc<T> process_logits_func_;
+  //BeamSearchDeviceHelper::InitBeamStateFunc<T> init_beam_state_func_;
+  //BeamSearchDeviceHelper::DeviceCopyFunc<float> device_copy_func_;
+  //BeamSearchDeviceHelper::UpdateFeedsFunc<T> update_feeds_func_;
+};
+
+
+template <typename T>
+OrtStatusPtr BeamSearchImpl<T>::Initialize() {
+  //TODO why a temporary allocator is needed??
+  //ORT_RETURN_IF_ERROR(context_.GetTempSpaceAllocator(&temp_space_allocator_));
+
+#define CHECK_SCALAR_INPUT(name, index, required)                                                                             \
+  auto* name##_tensor = ort_.KernelContext_GetInput(context_, index);                                                         \
+  if (name##_tensor) {                                                                                                        \
+    const OrtTensorTypeAndShapeInfo* tensor_info = ort_.GetTensorTypeAndShape(name##_tensor);                                 \
+    std::vector<int64_t> shape = ort_.GetTensorShape(tensor_info);                                                            \
+    if (shape.size() == 0 || (shape.size() == 1 && shape[0] == 1)) {                                                          \
+      return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT , "'BeamSearch' input " #name " doesn't have valid shape"); \
+    }                                                                                                                         \
+  } else if (required) {                                                                                                      \
+    return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "'BeamSearch' input " #name " is required");                 \
+  }
+
+  CHECK_SCALAR_INPUT(min_length, 1, false);
+
+  CHECK_SCALAR_INPUT(max_length, 2, true);
+
+  CHECK_SCALAR_INPUT(num_beams, 3, true);
+
+  CHECK_SCALAR_INPUT(num_return_sequences, 4, true);
+
+  CHECK_SCALAR_INPUT(temperature, 5, true);
+
+  CHECK_SCALAR_INPUT(length_penalty, 6, true);
+
+  //TODO Create a function in utils
+  // to create status messages based on a condition
+  if (parameters_.num_return_sequences > parameters_.num_beams) {
+    return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "'num_return_sequences' has to be smaller or equal to 'num_beams'.");
+  }
+
+  //TODO next_thing_to_be_implemented.
+  //ORT_RETURN_IF_ERROR(CheckInputs(context_));
+
+  // This flag will be updated later when the scores output exists.
+  parameters_.output_scores = false;
+
+  /*
+  if (!IsCuda()) {
+    // Logits processor is used in CPU only. In CUDA, cuda kernels are used instead.
+    // Initialize processsors after CheckInputs so that parameters_->vocab_mask is ready.
+    logits_processors_.Init(*parameters_);
+  }
+  */
+
+  return api_.CreateStatus(OrtErrorCode::ORT_OK, "Inputs good");
+}
 
 void SetBeamSearchOutputToZero(OrtKernelContext* context, Ort::CustomOpApi &ort, int batch_size, int seq_len) {
   //TODO Temp function to set the outputs of custom beam search OP to some value
@@ -58,15 +246,45 @@ void SetBeamSearchOutputToZero(OrtKernelContext* context, Ort::CustomOpApi &ort,
   }
 }
 
-void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort::CustomOpApi &ort, OrtSession *session) {
+void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort::CustomOpApi &ort, OrtSession *session, custombsop::BeamSearchParameters parameters) {
   std::vector<OrtValue*> inputs;
   std::vector<const char*> input_names{"input_ids", "position_ids", "attention_mask", "past_0", "past_1", "past_2", "past_3", "past_4", "past_5"};
 
+
+  // Both of the following should provide the same thing, one for memory info and other for ort allocator.
   OrtMemoryInfo *ortmemoryinfo;
   // Must be freed explicitly
   api.CreateMemoryInfo("Cpu", OrtAllocatorType::OrtDeviceAllocator, 0, OrtMemType::OrtMemTypeCPU, &ortmemoryinfo);
 
+  OrtAllocator *ortallocator;
+  api.GetAllocatorWithDefaultOptions(&ortallocator);
+
+
   void* thread_pool = ort.KernelContext_GetThreadPool(context);
+
+  BeamSearchImpl<float>impl{api,
+                            ort,
+                            context,
+                            //*session_state,
+                            //*gpt_subgraph_,
+                            thread_pool,
+                            //cuda_stream_,
+                            //dumper_,
+                            parameters,
+                            //std::make_unique<OrtAllocator>(*ortmemoryinfo),
+                            BeamSearchCpuDeviceHelper::CreateInputs};
+                            //add_to_feeds_func_ ? add_to_feeds_func_ : BeamSearchCpuDeviceHelper::AddToFeeds,
+                            //topk_func_ ? topk_func_ : BeamSearchCpuDeviceHelper::TopK,
+                            //process_logits_func_ ? process_logits_func_ : BeamSearchCpuDeviceHelper::ProcessLogits<float>,
+                            //init_beam_state_func_ ? init_beam_state_func_ : BeamSearchCpuDeviceHelper::InitBeamState<float>,
+                            //device_copy_func_ ? device_copy_func_ : BeamSearchCpuDeviceHelper::DeviceCopy<float>,
+                            //update_feeds_func_ ? update_feeds_func_ : BeamSearchCpuDeviceHelper::UpdateFeeds<float>};
+  OrtStatusPtr status_ptr = impl.Initialize();
+  if (status_ptr != nullptr) {
+    //TODO handle better than abort
+    std::cout<<" Beam search is not initialized properly : "<<api.GetErrorMessage(status_ptr)<<std::endl;
+    abort();
+  }
 
   const OrtValue* input_ids_tensor = ort.KernelContext_GetInput(context, 0);
   const int* input_ids = ort.GetTensorData<int>(input_ids_tensor);
@@ -77,7 +295,6 @@ void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort:
 
   int64_t batch_size = tensor_shape[0];
   int64_t seq_len = tensor_shape[1];
-
 
   // TODO, short cut to get the basic comparison with python version
   const OrtValue* max_length_tensor = ort.KernelContext_GetInput(context, 1);

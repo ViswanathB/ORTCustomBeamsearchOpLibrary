@@ -5,16 +5,17 @@
 
 using namespace std;
 
-void print_assertion() {
+static void print_assertion() {
     std::cout << std::endl;
 }
 
 template<typename First, typename... Rest>
-void print_assertion(First first, Rest&&... rest)
+static void print_assertion(First first, Rest&&... rest)
 {
     std::cout << first << std::endl;
     print_assertion(std::forward<Rest>(rest)...);
 }
+
 
 #define CUSTOMOP_ENFORCE(condition, ...)                                    \
     do {                                                                    \

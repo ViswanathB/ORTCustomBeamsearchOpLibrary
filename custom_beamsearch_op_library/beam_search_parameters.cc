@@ -6,24 +6,19 @@
 #include "onnxruntime_cxx_api.h"
 #undef ORT_API_MANUAL_INIT
 
-#include "utils.h"
-
 namespace custombsop {
 
 constexpr int kMaxSequenceLength = 4096;
 constexpr int kMaxNumBeams = 128;
 
 OrtStatusPtr BeamSearchParameters::Validate(OrtApi &api) const {
-  if (eos_token_id < 0)
-    return api.CreateStatus(ORT_FAIL, "invalid eos_token_id");
+  CUSTOMOP_ENFORCE(eos_token_id < 0, "invalid eos_token_id")
+  CUSTOMOP_ENFORCE(pad_token_id < 0, "invalid pad_token_id")
+  CUSTOMOP_ENFORCE(min_length >= max_length, "min_length is greater than max length")
 
-  if (pad_token_id < 0)
-    return api.CreateStatus(ORT_FAIL, "invalid pad_token_id");
-
-  if (min_length >= max_length)
-    return api.CreateStatus(ORT_FAIL, "min_length is greater than max length");
-
-  return api.CreateStatus(ORT_OK, "OK");
+  // TODO there is no point in returning statuses since at any point inside custom kernel
+  // failure, we don't want a dependency in ORT to fall back.
+  return api.CreateStatus(OrtErrorCode::ORT_OK, "OK");
 }
 
 void BeamSearchParameters::ParseFromAttributes(Ort::CustomOpApi &ort, const OrtKernelInfo* info) {

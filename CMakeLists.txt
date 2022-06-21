@@ -36,9 +36,11 @@ file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search.cc"
      "${CMAKE_CURRENT_BINARY_DIR}/utils.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_shared.cc"
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_shared.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.cc")
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.cc"
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.h"
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.cc")
 
 add_library(custom_beamsearch_op_library_cpu SHARED
     ${CMAKE_CURRENT_BINARY_DIR}/custom_beamsearch_op_library_cpu.cc

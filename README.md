@@ -6,6 +6,10 @@
 3. 
 
 ### TBD
+CustomOpApi is a wrapper around OrtAPI -> THIS IS good way to reduce the number of variables the user has to define.
+Write more of these for customOp api if needed. only thing we will be passing around CustomOpApi instead of ORtAPI.
+
+
 This is a custom OP to run beam search over a given model. The input to the application would be input ids as shown in the ONNX model.
 However, not all the inputs are utilized?? Why do they have to be utilized?
 
