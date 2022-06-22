@@ -12,16 +12,16 @@ static void print_assertion() {
 template<typename First, typename... Rest>
 static void print_assertion(First first, Rest&&... rest)
 {
-    std::cout << first << std::endl;
+    std::cout << first;
     print_assertion(std::forward<Rest>(rest)...);
 }
 
 
-#define CUSTOMOP_ENFORCE(condition, ...)                                    \
-    do {                                                                    \
-        if (!(condition)) {                                                 \
-            print_assertion("Assertion failed ", #condition,                \
-            " in file: ", __FILE__, " in line: ", __LINE__, __VA_ARGS__);   \
-        }                                                                   \
-        abort();                                                            \
+#define CUSTOMOP_ENFORCE(condition, ...)                                        \
+    do {                                                                        \
+        if (!(condition)) {                                                     \
+            print_assertion("Assertion failed ", #condition,                    \
+            " in file: ", __FILE__, " in line: ", __LINE__,":" , __VA_ARGS__);  \
+            abort();                                                            \
+        }                                                                       \
     } while (false);

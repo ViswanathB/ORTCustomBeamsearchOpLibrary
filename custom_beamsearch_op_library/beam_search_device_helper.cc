@@ -108,7 +108,8 @@ OrtStatusPtr CreateInputs(
   *expanded_position_ids = ExpandInputs(api, ort, position_ids, num_beams, ort_allocator, ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32);
   *expanded_attention_mask = ExpandInputs(api, ort, attention_mask, num_beams, ort_allocator, ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32);
 
-  return api.CreateStatus(OrtErrorCode::ORT_OK, "success");
+  return nullptr;
+  //return api.CreateStatus(OrtErrorCode::ORT_OK, "success");
 }
 
 }

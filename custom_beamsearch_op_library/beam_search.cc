@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 #include <cstdint>
 #include <iostream>
+#include <safeint.h>
 
 #include "beam_search.h"
 #include "beam_search_parameters.h"
@@ -65,7 +66,7 @@ class BeamSearchImpl {
   // Execute beam search in iterations util stopping criteria is reached.
   // In each iteration, GPT subgraph is called, and next token for each sequence is generated.
   //Status Execute(const FeedsFetchesManager& feeds_fetches_manager);
-  OrtStatusPtr Execute();
+  OrtStatusPtr Execute(const OrtValue *original_input_ids, OrtAllocator *ort_allocator);
 
  private:
   //bool IsCuda() const { return cuda_stream_ != nullptr; }
@@ -152,16 +153,16 @@ OrtStatusPtr BeamSearchImpl<T>::Initialize() {
   if (name##_tensor) {                                                                                                        \
     const OrtTensorTypeAndShapeInfo* tensor_info = ort_.GetTensorTypeAndShape(name##_tensor);                                 \
     std::vector<int64_t> shape = ort_.GetTensorShape(tensor_info);                                                            \
-    if (shape.size() == 0 || (shape.size() == 1 && shape[0] == 1)) {                                                          \
+    if (!(shape.size() == 0 || (shape.size() == 1 && shape[0] == 1))) {                                                       \
       return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT , "'BeamSearch' input " #name " doesn't have valid shape"); \
     }                                                                                                                         \
   } else if (required) {                                                                                                      \
     return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "'BeamSearch' input " #name " is required");                 \
   }
 
-  CHECK_SCALAR_INPUT(min_length, 1, false);
+  CHECK_SCALAR_INPUT(max_length, 1, false);
 
-  CHECK_SCALAR_INPUT(max_length, 2, true);
+  CHECK_SCALAR_INPUT(min_length, 2, true);
 
   CHECK_SCALAR_INPUT(num_beams, 3, true);
 
@@ -191,7 +192,79 @@ OrtStatusPtr BeamSearchImpl<T>::Initialize() {
   }
   */
 
-  return api_.CreateStatus(OrtErrorCode::ORT_OK, "Inputs good");
+  return nullptr;
+  //return api_.CreateStatus(OrtErrorCode::ORT_OK, "Inputs good");
+}
+
+template <typename T>
+gsl::span<T> AllocateBuffer(OrtAllocator *allocator,
+                            void **buffer,
+                            size_t elements,
+                            bool fill = false,
+                            T fill_value = T{}) {
+  //size_t bytes = SafeInt<size_t>(sizeof(T)) * elements;
+  size_t bytes = sizeof(T) * elements;
+  *buffer = allocator->Alloc(allocator, bytes);
+
+  //void* data = allocator->Alloc(bytes);
+  //BufferUniquePtr temp_buffer(data, BufferDeleter(allocator));
+  //buffer = std::move(temp_buffer);
+  
+  T* first = reinterpret_cast<T*>(*buffer);
+  auto span = gsl::make_span(first, elements);
+
+  if (fill) {
+    std::fill_n(first, elements, fill_value);
+  }
+
+  return span;
+}
+
+template <typename T>
+OrtStatusPtr BeamSearchImpl<T>::Execute(const OrtValue *original_input_ids, OrtAllocator *ort_allocator) {
+  std::cout<<"Calling create inputs:"<<std::endl;
+
+  void* sequence_lengths_buffer;
+  gsl::span<int32_t> sequence_lengths_ = AllocateBuffer<int32_t>(ort_allocator, &sequence_lengths_buffer, parameters_.BatchBeamSize());
+
+  OrtValue *expanded_inputs;
+  OrtValue *expanded_position_ids;
+  OrtValue *expanded_attention_mask;
+  OrtStatusPtr status = create_inputs_func_(api_, ort_, original_input_ids, 
+            parameters_.num_beams, parameters_.pad_token_id, sequence_lengths_, ort_allocator,
+            &expanded_inputs, &expanded_position_ids, &expanded_attention_mask);
+  if (status != nullptr) {
+    std::cout<<"Error while expanding inputs:"<<api_.GetErrorMessage(status)<< std::endl;
+    abort();
+  }
+
+  /*
+  //TODO Remove Debugs to print expanded inputs
+  int32_t* expanded_inputs_data = ort_.GetTensorMutableData<int32_t>(expanded_inputs);
+  int32_t* expanded_position_ids_data = ort_.GetTensorMutableData<int32_t>(expanded_position_ids);
+  int32_t* expanded_attention_mask_data = ort_.GetTensorMutableData<int32_t>(expanded_attention_mask);
+
+  std::cout<<"ALL Expanded inputs:"<<std::endl;
+  for (int i = 0; i < parameters_.batch_size; i++) {
+    for (int j = 0; j < parameters_.num_beams;j++) {
+      for (int k = 0; k < parameters_.sequence_length;k++){
+        std::cout<<expanded_inputs_data[i*parameters_.num_beams + j*parameters_.sequence_length + k]<<",";
+      }
+      std::cout<<std::endl;
+      for (int k = 0; k < parameters_.sequence_length;k++){
+        std::cout<<expanded_position_ids_data[i*parameters_.num_beams + j*parameters_.sequence_length + k]<<",";
+      }
+      std::cout<<std::endl;
+      for (int k = 0; k < parameters_.sequence_length;k++){
+        std::cout<<expanded_attention_mask_data[i*parameters_.num_beams + j*parameters_.sequence_length + k]<<",";
+      }
+      std::cout<<std::endl;
+    }
+    std::cout<<std::endl;
+  }
+  */
+
+  return nullptr;
 }
 
 void SetBeamSearchOutputToZero(OrtKernelContext* context, Ort::CustomOpApi &ort, int batch_size, int seq_len) {
@@ -289,6 +362,8 @@ void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort:
   const OrtValue* input_ids_tensor = ort.KernelContext_GetInput(context, 0);
   const int* input_ids = ort.GetTensorData<int>(input_ids_tensor);
   
+  impl.Execute(input_ids_tensor, ortallocator);
+
   OrtTensorTypeAndShapeInfo* input_ids_info = ort.GetTensorTypeAndShape(input_ids_tensor);
   std::vector<int64_t> tensor_shape = ort.GetTensorShape(input_ids_info);
   ort.ReleaseTensorTypeAndShapeInfo(input_ids_info);
@@ -390,10 +465,11 @@ void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort:
     outputs.emplace_back(ort_present);
   }
   
-  for (int i = 0; i < iterations; i++) {
+  //for (int i = 0; i < iterations; i++) {
+  for (int i = 0; i < 1; i++) {
     //std::cout<<"Running it for "<<iterations<<std::endl;
     api.Run(session, nullptr, input_names.data(), inputs.data(), 9, output_names.data(), 7, outputs.data());
-  } 
+  }
 #ifdef PRINT_TO_CONSOLE
   std::cout<<"Printing logits"<<std::endl;
   float* logits = ort.GetTensorMutableData<float>(outputs[0]);

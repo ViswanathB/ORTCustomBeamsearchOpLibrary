@@ -12,13 +12,14 @@ constexpr int kMaxSequenceLength = 4096;
 constexpr int kMaxNumBeams = 128;
 
 OrtStatusPtr BeamSearchParameters::Validate(OrtApi &api) const {
-  CUSTOMOP_ENFORCE(eos_token_id < 0, "invalid eos_token_id")
-  CUSTOMOP_ENFORCE(pad_token_id < 0, "invalid pad_token_id")
-  CUSTOMOP_ENFORCE(min_length >= max_length, "min_length is greater than max length")
+  CUSTOMOP_ENFORCE(eos_token_id > 0, "invalid eos_token_id")
+  CUSTOMOP_ENFORCE(pad_token_id > 0, "invalid pad_token_id")
+  CUSTOMOP_ENFORCE(min_length < max_length, "min_length must be less than max length")
 
   // TODO there is no point in returning statuses since at any point inside custom kernel
   // failure, we don't want a dependency in ORT to fall back.
-  return api.CreateStatus(OrtErrorCode::ORT_OK, "OK");
+  return nullptr;
+  //return api.CreateStatus(OrtErrorCode::ORT_OK, "OK");
 }
 
 void BeamSearchParameters::ParseFromAttributes(Ort::CustomOpApi &ort, const OrtKernelInfo* info) {
@@ -43,7 +44,7 @@ void BeamSearchParameters::ParseFromInputs(OrtKernelContext* context, Ort::Custo
   sequence_length = static_cast<int>(tensor_shape[1]);
 
   const OrtValue* max_length_tensor = ort.KernelContext_GetInput(context, 1);
-  max_length = max_length_tensor ? static_cast<int>(*ort.GetTensorData<int>(input_ids_tensor)) : kMaxSequenceLength;
+  max_length = max_length_tensor ? static_cast<int>(*ort.GetTensorData<int>(max_length_tensor)) : kMaxSequenceLength;
   CUSTOMOP_ENFORCE(max_length > sequence_length, "max_length (", max_length, ") shall be greater than input sequence length (", sequence_length, ")");
   CUSTOMOP_ENFORCE(max_length <= kMaxSequenceLength, "max_length (", max_length, ") shall be no more than ", kMaxSequenceLength);
 
