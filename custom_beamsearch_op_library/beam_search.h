@@ -11,4 +11,4 @@ using namespace std;
 #include "beam_search_parameters.h"
 
 //#define PRINT_TO_CONSOLE
-void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort::CustomOpApi &ort, OrtSession *session, custombsop::BeamSearchParameters parameters);
+OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort::CustomOpApi &ort, OrtSession *session, custombsop::BeamSearchParameters parameters);

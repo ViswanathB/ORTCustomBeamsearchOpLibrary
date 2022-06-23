@@ -39,6 +39,8 @@ file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_shared.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.cc"
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_scorer.h"
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_scorer.cc"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.cc")
 

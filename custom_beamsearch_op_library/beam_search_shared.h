@@ -39,19 +39,20 @@ class ISequences {
   virtual int GetSequenceLength() const = 0;
 };
 
+/*
 class ILogitsProcessorList {
  public:
   virtual ~ILogitsProcessorList() {}
   virtual void Process(const ISequences* sequences, gsl::span<float>& next_token_scores, int step) = 0;
 };
+*/
 
-/*
 // Interface for all scorers for beam search or beam sample.
 class IBeamScorer {
  public:
   virtual ~IBeamScorer() {}
 
-  virtual void Initialize(AllocatorPtr& allocator, int sequence_length) = 0;
+  virtual void Initialize(OrtAllocator* allocator, int sequence_length) = 0;
 
   virtual void Process(ISequences* sequences,
                        gsl::span<const float>& next_scores,
@@ -60,10 +61,9 @@ class IBeamScorer {
 
   virtual void Finalize(ISequences* sequences,
                         gsl::span<const float>& final_beam_scores,
-                        Tensor* output_sequences,
-                        Tensor* output_sequence_scores) = 0;
+                        OrtValue* output_sequences,
+                        OrtValue* output_sequence_scores) = 0;
 };
-*/
 
 struct IBeamSearchParameters {
   // Parameters from node attributes

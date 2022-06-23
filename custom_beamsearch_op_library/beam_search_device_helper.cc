@@ -2,7 +2,19 @@
 #include "safeint.h"
 #include "gsl/gsl"
 
+using namespace std;
+
 namespace BeamSearchCpuDeviceHelper {
+
+OrtStatusPtr AddToFeeds(OrtValue* input_ids,
+                        OrtValue* position_ids,
+                        OrtValue* attention_mask,
+                        std::vector<OrtValue*>& feeds) {
+  feeds.push_back(std::move(input_ids));
+  feeds.push_back(std::move(position_ids));
+  feeds.push_back(std::move(attention_mask));
+  return nullptr;
+}
 
 OrtValue* ExpandInputs(OrtApi &api, Ort::CustomOpApi &ort, OrtValue* input, int num_beams, OrtAllocator *allocator, ONNXTensorElementDataType element_type) {
   // Input shape (batch_size, sequence_length)
@@ -37,17 +49,16 @@ OrtValue* ExpandInputs(OrtApi &api, Ort::CustomOpApi &ort, OrtValue* input, int 
   return expanded;
 }
 
-OrtStatusPtr CreateInputs(
-    OrtApi &api,
-    Ort::CustomOpApi &ort,
-    const OrtValue* original_input_ids,
-    int num_beams,
-    int pad_token_id,
-    gsl::span<int32_t>& sequence_lengths,
-    OrtAllocator *ort_allocator,
-    OrtValue** expanded_input_ids,
-    OrtValue** expanded_position_ids,
-    OrtValue** expanded_attention_mask) {
+OrtStatusPtr CreateInputs(OrtApi &api,
+                          Ort::CustomOpApi &ort,
+                          const OrtValue* original_input_ids,
+                          int num_beams,
+                          int pad_token_id,
+                          gsl::span<int32_t>& sequence_lengths,
+                          OrtAllocator *ort_allocator,
+                          OrtValue** expanded_input_ids,
+                          OrtValue** expanded_position_ids,
+                          OrtValue** expanded_attention_mask) {
   
   const OrtTensorTypeAndShapeInfo* original_input_ids_info = ort.GetTensorTypeAndShape(original_input_ids);
   std::vector<int64_t> original_input_ids_shape = ort.GetTensorShape(original_input_ids_info); 

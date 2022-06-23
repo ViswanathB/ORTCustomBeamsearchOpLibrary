@@ -7,6 +7,7 @@
 #include "beam_search.h"
 #include "beam_search_parameters.h"
 #include "beam_search_device_helper.h"
+#include "beam_search_scorer.h"
 #include "utils.h"
 
 using namespace std;
@@ -24,8 +25,9 @@ class BeamSearchImpl {
                  //IConsoleDumper* cuda_dumper,
                  custombsop::BeamSearchParameters &params,
                  //OrtAllocator *ort_allocator,
-                 const BeamSearchDeviceHelper::CreateInputsFunc& create_inputs_func)
-                 //const BeamSearchDeviceHelper::AddToFeedsFunc& add_to_feeds_func,
+                 const BeamSearchDeviceHelper::CreateInputsFunc& create_inputs_func,
+                 const BeamSearchDeviceHelper::AddToFeedsFunc& add_to_feeds_func)
+                 //TODO next_thing_to_be_implemented.
                  //const BeamSearchDeviceHelper::TopkFunc& topk_func,
                  //const BeamSearchDeviceHelper::ProcessLogitsFunc<T>& process_logits_func,
                  //const BeamSearchDeviceHelper::InitBeamStateFunc<T>& init_beam_state_func,
@@ -66,13 +68,13 @@ class BeamSearchImpl {
   // Execute beam search in iterations util stopping criteria is reached.
   // In each iteration, GPT subgraph is called, and next token for each sequence is generated.
   //Status Execute(const FeedsFetchesManager& feeds_fetches_manager);
-  OrtStatusPtr Execute(const OrtValue *original_input_ids, OrtAllocator *ort_allocator);
+  OrtStatusPtr Execute(OrtKernelContext* context, const OrtValue *original_input_ids, OrtAllocator *ort_allocator, OrtMemoryInfo *ortmemoryinfo);
 
  private:
   //bool IsCuda() const { return cuda_stream_ != nullptr; }
 
   // Validate inputs.
-  OrtStatusPtr CheckInputs(const OrtKernelContext& context);
+  OrtStatusPtr CheckInputs(const OrtKernelContext* context);
 
   // Prepare the inputs for first inference of subgraph
   //OrtStatusPtr CreateInitialFeeds(gsl::span<int32_t>& sequence_lengths, OrtValue& expanded_input_ids, std::vector<OrtValue>& feeds, IAllocatorUniquePtr<char>& buffer);
@@ -127,7 +129,7 @@ class BeamSearchImpl {
 
   //LogitsProcessorList logits_processors_;
 
-  //std::unique_ptr<BeamSearchScorer> beam_scorer_;
+  std::unique_ptr<custombsop::BeamSearchScorer> beam_scorer_;
 
   OrtAllocator* cpu_allocator_;
   //AllocatorPtr temp_space_allocator_;
@@ -142,6 +144,68 @@ class BeamSearchImpl {
   //BeamSearchDeviceHelper::UpdateFeedsFunc<T> update_feeds_func_;
 };
 
+
+template <typename T>
+OrtStatusPtr BeamSearchImpl<T>::CheckInputs(const OrtKernelContext* context) {
+  // Input shapes:
+  //   input_ids  : (batch_size, sequence_length)
+  //   vocab_mask : (vocab_size) or nullptr
+
+  const OrtValue* input_ids = ort_.KernelContext_GetInput(context, 0);
+  OrtTensorTypeAndShapeInfo* input_ids_info = ort_.GetTensorTypeAndShape(input_ids);
+  std::vector<int64_t> input_ids_shape = ort_.GetTensorShape(input_ids_info);
+  if (input_ids_shape.size() != 2) {
+    return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
+                             MakeString("Input 'input_ids' is expected to have 2 dimensions, got ", input_ids_shape.size()));
+  }
+
+  const OrtValue* vocab_mask = ort_.KernelContext_GetInput(context, 8);
+  if (vocab_mask != nullptr) {  // vocab_mask is optional
+    OrtTensorTypeAndShapeInfo* vocab_mask_info = ort_.GetTensorTypeAndShape(vocab_mask);
+    std::vector<int64_t> vocab_mask_shape = ort_.GetTensorShape(vocab_mask_info);
+    if (vocab_mask_shape.size() != 1) {
+      return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
+                              MakeString("Input 'vocab_mask' is expected to have 1 dimension, got ", vocab_mask_shape.size()));
+    }
+
+    // There is dependency on vocab_size parameter, which shall be set before calling this function.
+    if (static_cast<int>(vocab_mask_shape[0]) != parameters_.vocab_size) {
+      return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
+                              MakeString("Input 'vocab_mask' shape does not match with vocab_size, got ", vocab_mask_shape[0]));
+    }
+
+    // store vocab mask in parameters.
+    const int* vm_tensor = ort_.GetTensorData<int>(vocab_mask);
+    parameters_.vocab_mask = gsl::make_span(vm_tensor, parameters_.vocab_size);
+  }
+
+  const OrtValue* prefix_vocab_mask = ort_.KernelContext_GetInput(context, 9);
+  if (prefix_vocab_mask != nullptr) {
+    // prefix_vocab_mask is optional
+    OrtTensorTypeAndShapeInfo* p_vocab_mask_info = ort_.GetTensorTypeAndShape(prefix_vocab_mask);
+    std::vector<int64_t> p_vocab_mask_shape = ort_.GetTensorShape(p_vocab_mask_info);
+    if (p_vocab_mask_shape.size() != 2) {
+      return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
+                               MakeString("Input 'prefix_vocab_mask' is expected to have 2 dimensions, got ", p_vocab_mask_shape.size()));
+    }
+
+    // prefix_vocab_mask first dimension should be same as the first dimension of input_ids
+    if (static_cast<int>(p_vocab_mask_shape[0]) != static_cast<int>(input_ids_shape[0])) {
+      return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "input_ids and prefix_vocab_mask must have the same batch_size");
+    }
+
+    // There is dependency on vocab_size parameter, which shall be set before calling this function.
+    if (static_cast<int>(p_vocab_mask_shape[1]) != parameters_.vocab_size) {
+      return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
+                              MakeString("Input 'prefix_vocab_mask' shape does not match with vocab_size, got ", p_vocab_mask_shape[1]));
+    }
+
+    // store prefix vocab mask in parameters.
+    const int* pvm_tensor = ort_.GetTensorData<int>(prefix_vocab_mask);
+    parameters_.prefix_vocab_mask = gsl::make_span(pvm_tensor, parameters_.batch_size * parameters_.vocab_size);
+  }
+  return nullptr;
+}
 
 template <typename T>
 OrtStatusPtr BeamSearchImpl<T>::Initialize() {
@@ -178,8 +242,7 @@ OrtStatusPtr BeamSearchImpl<T>::Initialize() {
     return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "'num_return_sequences' has to be smaller or equal to 'num_beams'.");
   }
 
-  //TODO next_thing_to_be_implemented.
-  //ORT_RETURN_IF_ERROR(CheckInputs(context_));
+  CUSTOMOP_RETURN_IF_ERROR(CheckInputs(context_));
 
   // This flag will be updated later when the scores output exists.
   parameters_.output_scores = false;
@@ -197,33 +260,40 @@ OrtStatusPtr BeamSearchImpl<T>::Initialize() {
 }
 
 template <typename T>
-gsl::span<T> AllocateBuffer(OrtAllocator *allocator,
-                            void **buffer,
-                            size_t elements,
-                            bool fill = false,
-                            T fill_value = T{}) {
-  //size_t bytes = SafeInt<size_t>(sizeof(T)) * elements;
-  size_t bytes = sizeof(T) * elements;
-  *buffer = allocator->Alloc(allocator, bytes);
-
-  //void* data = allocator->Alloc(bytes);
-  //BufferUniquePtr temp_buffer(data, BufferDeleter(allocator));
-  //buffer = std::move(temp_buffer);
-  
-  T* first = reinterpret_cast<T*>(*buffer);
-  auto span = gsl::make_span(first, elements);
-
-  if (fill) {
-    std::fill_n(first, elements, fill_value);
-  }
-
-  return span;
-}
-
-template <typename T>
-OrtStatusPtr BeamSearchImpl<T>::Execute(const OrtValue *original_input_ids, OrtAllocator *ort_allocator) {
+OrtStatusPtr BeamSearchImpl<T>::Execute(OrtKernelContext* context, const OrtValue *original_input_ids, OrtAllocator *ort_allocator, OrtMemoryInfo *ortmemoryinfo) {
   std::cout<<"Calling create inputs:"<<std::endl;
 
+  std::vector<OrtValue*> outputs;
+  OrtValue* sequences;
+  size_t sequences_data_size = parameters_.batch_size * parameters_.num_return_sequences * parameters_.max_length;
+  std::vector<int32_t> sequences_data(sequences_data_size, 0);
+  vector<int64_t> sequences_dims = {parameters_.batch_size, parameters_.num_return_sequences, parameters_.max_length};
+  api_.CreateTensorWithDataAsOrtValue(ortmemoryinfo, sequences_data.data(), size_t(4)*sequences_data_size, sequences_dims.data(),
+      sequences_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &sequences);
+  outputs.emplace_back(std::move(sequences));
+
+  OrtValue* sequences_scores;
+  size_t sequences_scores_data_size = parameters_.batch_size * parameters_.num_return_sequences;
+  std::vector<float> sequences_scores_data(sequences_scores_data_size, 0);
+  vector<int64_t> sequences_scores_dims = {parameters_.batch_size, parameters_.num_return_sequences};
+  api_.CreateTensorWithDataAsOrtValue(ortmemoryinfo, sequences_scores_data.data(), size_t(4)*sequences_scores_data_size, sequences_scores_dims.data(),
+      sequences_scores_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &sequences_scores);
+  outputs.emplace_back(std::move(sequences_scores));
+
+  std::vector<OrtValue*> feeds;
+  std::vector<OrtValue*> fetches;
+
+  beam_scorer_ = std::make_unique<custombsop::BeamSearchScorer>(static_cast<size_t>(parameters_.batch_size),
+                                                    static_cast<size_t>(parameters_.num_beams),
+                                                    static_cast<size_t>(parameters_.max_length),
+                                                    parameters_.length_penalty,
+                                                    parameters_.early_stopping,
+                                                    static_cast<size_t>(parameters_.num_return_sequences),
+                                                    parameters_.pad_token_id,
+                                                    parameters_.eos_token_id);
+  beam_scorer_->Initialize(ort_allocator, parameters_.sequence_length);
+
+  //TODO how is stack address working when call is made to AllocateBuffer
   void* sequence_lengths_buffer;
   gsl::span<int32_t> sequence_lengths_ = AllocateBuffer<int32_t>(ort_allocator, &sequence_lengths_buffer, parameters_.BatchBeamSize());
 
@@ -319,10 +389,9 @@ void SetBeamSearchOutputToZero(OrtKernelContext* context, Ort::CustomOpApi &ort,
   }
 }
 
-void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort::CustomOpApi &ort, OrtSession *session, custombsop::BeamSearchParameters parameters) {
+OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort::CustomOpApi &ort, OrtSession *session, custombsop::BeamSearchParameters parameters) {
   std::vector<OrtValue*> inputs;
   std::vector<const char*> input_names{"input_ids", "position_ids", "attention_mask", "past_0", "past_1", "past_2", "past_3", "past_4", "past_5"};
-
 
   // Both of the following should provide the same thing, one for memory info and other for ort allocator.
   OrtMemoryInfo *ortmemoryinfo;
@@ -345,10 +414,10 @@ void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort:
                             //dumper_,
                             parameters,
                             //std::make_unique<OrtAllocator>(*ortmemoryinfo),
-                            BeamSearchCpuDeviceHelper::CreateInputs};
-                            //add_to_feeds_func_ ? add_to_feeds_func_ : BeamSearchCpuDeviceHelper::AddToFeeds,
+                            BeamSearchCpuDeviceHelper::CreateInputs,
+                            BeamSearchCpuDeviceHelper::AddToFeeds};
                             //topk_func_ ? topk_func_ : BeamSearchCpuDeviceHelper::TopK,
-                            //process_logits_func_ ? process_logits_func_ : BeamSearchCpuDeviceHelper::ProcessLogits<float>,
+                            //BeamsearchCpuDeviceHelper::ProcessLogits<float>,
                             //init_beam_state_func_ ? init_beam_state_func_ : BeamSearchCpuDeviceHelper::InitBeamState<float>,
                             //device_copy_func_ ? device_copy_func_ : BeamSearchCpuDeviceHelper::DeviceCopy<float>,
                             //update_feeds_func_ ? update_feeds_func_ : BeamSearchCpuDeviceHelper::UpdateFeeds<float>};
@@ -362,7 +431,7 @@ void RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort:
   const OrtValue* input_ids_tensor = ort.KernelContext_GetInput(context, 0);
   const int* input_ids = ort.GetTensorData<int>(input_ids_tensor);
   
-  impl.Execute(input_ids_tensor, ortallocator);
+  impl.Execute(context, input_ids_tensor, ortallocator, ortmemoryinfo);
 
   OrtTensorTypeAndShapeInfo* input_ids_info = ort.GetTensorTypeAndShape(input_ids_tensor);
   std::vector<int64_t> tensor_shape = ort.GetTensorShape(input_ids_info);
