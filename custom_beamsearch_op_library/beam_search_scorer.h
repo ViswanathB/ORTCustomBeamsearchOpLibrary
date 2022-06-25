@@ -1,7 +1,6 @@
 #include <queue>
 #include "beam_search_shared.h"
 
-
 using namespace std;
 
 namespace custombsop {

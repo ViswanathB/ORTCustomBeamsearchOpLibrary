@@ -8,9 +8,94 @@
 #include "beam_search_parameters.h"
 #include "beam_search_device_helper.h"
 #include "beam_search_scorer.h"
+#include "sequences.h"
+#include "dump_tensor.h"
 #include "utils.h"
 
 using namespace std;
+using namespace msl::utilities;
+namespace custombsop {
+
+struct BeamSearchCpuState : public custombsop::IBeamSearchCpuState {
+  custombsop::Sequences sequences;
+
+  void Init(OrtAllocator* ort_allocator, size_t batch_beam_size, int max_length, bool is_cuda) {
+    void *temp_ptr;
+    this->sequence_lengths = AllocateBuffer<int32_t>(ort_allocator, &temp_ptr, batch_beam_size);
+    sequence_lengths_buffer_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
+    this->sequences_space = AllocateBuffer<int32_t>(ort_allocator, &temp_ptr, size_t(2) * batch_beam_size * max_length);
+    sequences_space_buffer_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
+
+    // TODO This is only needed for cuda, so commenting this out
+    // rather this code path is never hit.
+    if (is_cuda) {
+     /* // buffers used by CUDA operator but not by CPU operator.
+      this->topk_scores = AllocateBuffer<float>(ort_allocator, topk_scores_buffer_, 2 * batch_beam_size);
+      this->topk_tokens = AllocateBuffer<int32_t>(ort_allocator, topk_tokens_buffer_, 2 * batch_beam_size);
+      this->topk_indices = AllocateBuffer<int32_t>(ort_allocator, topk_indices_buffer_, 2 * batch_beam_size);
+      this->final_beam_scores = AllocateBuffer<float>(ort_allocator, final_beam_scores_buffer_, batch_beam_size);
+      */
+    }
+  }
+
+ private:
+  std::unique_ptr<float> final_beam_scores_buffer_;
+  std::unique_ptr<int32_t> sequence_lengths_buffer_;
+  std::unique_ptr<float> topk_scores_buffer_;
+  std::unique_ptr<int32_t> topk_tokens_buffer_;
+  std::unique_ptr<int32_t> topk_indices_buffer_;
+  std::unique_ptr<int32_t> sequences_space_buffer_;
+};
+
+template<typename T>
+struct BeamSearchState : public custombsop::IBeamSearchState<T> {
+  void Init(OrtAllocator* allocator,
+            int batch_size,
+            int num_beams,
+            int vocab_size,
+            int sequence_length,
+            int max_length,
+            bool output_scores) {
+    size_t batch_beam_size = SafeInt<size_t>(batch_size) * num_beams;
+
+    size_t next_token_size = SafeInt<size_t>(batch_beam_size) * vocab_size;
+
+    void *temp_ptr;
+    this->next_token_logits = AllocateBuffer<T>(allocator, &temp_ptr, next_token_size);
+    next_token_logits_buffer_ = std::move(std::unique_ptr<T>(reinterpret_cast<T*>(temp_ptr)));
+
+    this->next_token_scores = AllocateBuffer<float>(allocator, &temp_ptr, next_token_size);
+    next_token_scores_buffer_ = std::move(std::unique_ptr<float>(reinterpret_cast<float*>(temp_ptr)));
+
+    this->next_tokens = AllocateBuffer<int32_t>(allocator, &temp_ptr, SafeInt<size_t>(2) * batch_beam_size);
+    next_tokens_buffer_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
+
+    this->next_indices = AllocateBuffer<int32_t>(allocator, &temp_ptr, SafeInt<size_t>(2) * batch_beam_size);
+    next_indices_buffer_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
+
+    this->next_positions = AllocateBuffer<int32_t>(allocator, &temp_ptr, batch_beam_size);
+    next_positions_buffer_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
+
+    this->beam_scores = AllocateBuffer<float>(allocator, &temp_ptr, batch_beam_size);
+    beam_scores_buffer_ = std::move(std::unique_ptr<float>(reinterpret_cast<float*>(temp_ptr)));
+
+    if (output_scores) {
+      size_t elements = SafeInt<size_t>(max_length - sequence_length) * batch_size * num_beams * vocab_size;
+      this->scores = AllocateBuffer<float>(allocator, &temp_ptr, elements);
+      scores_buffer_ = std::move(std::unique_ptr<float>(reinterpret_cast<float*>(temp_ptr)));
+      this->remaining_scores = this->scores;
+    }
+  }
+
+ private:
+  std::unique_ptr<T> next_token_logits_buffer_;
+  std::unique_ptr<float> next_token_scores_buffer_;
+  std::unique_ptr<int32_t> next_tokens_buffer_;
+  std::unique_ptr<int32_t> next_indices_buffer_;
+  std::unique_ptr<int32_t> next_positions_buffer_;
+  std::unique_ptr<float> beam_scores_buffer_;
+  std::unique_ptr<float> scores_buffer_;
+};
 
 template <typename T>
 class BeamSearchImpl {
@@ -21,16 +106,16 @@ class BeamSearchImpl {
                  //const SessionState& session_state,
                  //GptSubgraph& gpt_subgraph,
                  void* thread_pool,
-                 //void* cuda_stream,
+                 void* cuda_stream,
                  //IConsoleDumper* cuda_dumper,
                  custombsop::BeamSearchParameters &params,
                  //OrtAllocator *ort_allocator,
                  const BeamSearchDeviceHelper::CreateInputsFunc& create_inputs_func,
-                 const BeamSearchDeviceHelper::AddToFeedsFunc& add_to_feeds_func)
+                 const BeamSearchDeviceHelper::AddToFeedsFunc& add_to_feeds_func,
                  //TODO next_thing_to_be_implemented.
                  //const BeamSearchDeviceHelper::TopkFunc& topk_func,
                  //const BeamSearchDeviceHelper::ProcessLogitsFunc<T>& process_logits_func,
-                 //const BeamSearchDeviceHelper::InitBeamStateFunc<T>& init_beam_state_func,
+                 const BeamSearchDeviceHelper::InitBeamStateFunc<T>& init_beam_state_func)
                  //const BeamSearchDeviceHelper::DeviceCopyFunc<float>& device_copy_func,
                  //const BeamSearchDeviceHelper::UpdateFeedsFunc<T>& update_feeds_func)
       : api_(api),
@@ -40,16 +125,16 @@ class BeamSearchImpl {
         //gpt_subgraph_(gpt_subgraph),
         thread_pool_(thread_pool),
         //implicit_inputs_(context_.GetImplicitInputs()),
-        //cuda_stream_(cuda_stream),
+        cuda_stream_(cuda_stream),
         //cuda_dumper_(cuda_dumper),
         parameters_(params),
         //cpu_allocator_(ort_allocator),
         //temp_space_allocator_(nullptr),
-        create_inputs_func_(create_inputs_func) {
-        //add_to_feeds_func_(add_to_feeds_func),
+        create_inputs_func_(create_inputs_func),
+        add_to_feeds_func_(add_to_feeds_func),
         //topk_func_(topk_func),
         //process_logits_func_(process_logits_func),
-        //init_beam_state_func_(init_beam_state_func),
+        init_beam_state_func_(init_beam_state_func){
         //device_copy_func_(device_copy_func),
         //update_feeds_func_(update_feeds_func) {
 
@@ -71,7 +156,7 @@ class BeamSearchImpl {
   OrtStatusPtr Execute(OrtKernelContext* context, const OrtValue *original_input_ids, OrtAllocator *ort_allocator, OrtMemoryInfo *ortmemoryinfo);
 
  private:
-  //bool IsCuda() const { return cuda_stream_ != nullptr; }
+  bool IsCuda() const { return cuda_stream_ != nullptr; }
 
   // Validate inputs.
   OrtStatusPtr CheckInputs(const OrtKernelContext* context);
@@ -104,7 +189,7 @@ class BeamSearchImpl {
                        AllocatorPtr& allocator,
                        int counter);
   */
-  //const IConsoleDumper* GetConsoleDumper() const { return IsCuda() ? cuda_dumper_ : &(cpu_dumper_); }
+  const custombsop::IConsoleDumper* GetConsoleDumper() const { return IsCuda() ? cuda_dumper_ : &(cpu_dumper_); }
 
   OrtApi api_;
 
@@ -120,10 +205,10 @@ class BeamSearchImpl {
 
   //const std::vector<const OrtValue*>& implicit_inputs_;
 
-  //void* cuda_stream_;
+  void* cuda_stream_;
 
-  //IConsoleDumper* cuda_dumper_;
-  //CpuTensorConsoleDumper cpu_dumper_;
+  custombsop::IConsoleDumper* cuda_dumper_;
+  custombsop::CpuTensorConsoleDumper cpu_dumper_;
 
   custombsop::BeamSearchParameters parameters_;
 
@@ -136,10 +221,10 @@ class BeamSearchImpl {
 
   // Device specific functions
   BeamSearchDeviceHelper::CreateInputsFunc create_inputs_func_;
-  //BeamSearchDeviceHelper::AddToFeedsFunc add_to_feeds_func_;
+  BeamSearchDeviceHelper::AddToFeedsFunc add_to_feeds_func_;
   //BeamSearchDeviceHelper::TopkFunc topk_func_;
   //BeamSearchDeviceHelper::ProcessLogitsFunc<T> process_logits_func_;
-  //BeamSearchDeviceHelper::InitBeamStateFunc<T> init_beam_state_func_;
+  BeamSearchDeviceHelper::InitBeamStateFunc<T> init_beam_state_func_;
   //BeamSearchDeviceHelper::DeviceCopyFunc<float> device_copy_func_;
   //BeamSearchDeviceHelper::UpdateFeedsFunc<T> update_feeds_func_;
 };
@@ -256,7 +341,6 @@ OrtStatusPtr BeamSearchImpl<T>::Initialize() {
   */
 
   return nullptr;
-  //return api_.CreateStatus(OrtErrorCode::ORT_OK, "Inputs good");
 }
 
 template <typename T>
@@ -293,20 +377,59 @@ OrtStatusPtr BeamSearchImpl<T>::Execute(OrtKernelContext* context, const OrtValu
                                                     parameters_.eos_token_id);
   beam_scorer_->Initialize(ort_allocator, parameters_.sequence_length);
 
+  BeamSearchCpuState cpu_state;
+  cpu_state.Init(ort_allocator, static_cast<size_t>(parameters_.BatchBeamSize()), parameters_.max_length, IsCuda());
+
   //TODO how is stack address working when call is made to AllocateBuffer
-  void* sequence_lengths_buffer;
-  gsl::span<int32_t> sequence_lengths_ = AllocateBuffer<int32_t>(ort_allocator, &sequence_lengths_buffer, parameters_.BatchBeamSize());
+  //void* sequence_lengths_buffer;
+  //gsl::span<int32_t> sequence_lengths_ = AllocateBuffer<int32_t>(ort_allocator, &sequence_lengths_buffer, parameters_.BatchBeamSize());
 
   OrtValue *expanded_inputs;
   OrtValue *expanded_position_ids;
   OrtValue *expanded_attention_mask;
   OrtStatusPtr status = create_inputs_func_(api_, ort_, original_input_ids, 
-            parameters_.num_beams, parameters_.pad_token_id, sequence_lengths_, ort_allocator,
+            parameters_.num_beams, parameters_.pad_token_id, cpu_state.sequence_lengths, ort_allocator,
             &expanded_inputs, &expanded_position_ids, &expanded_attention_mask);
   if (status != nullptr) {
     std::cout<<"Error while expanding inputs:"<<api_.GetErrorMessage(status)<< std::endl;
-    abort();
+    return status;
   }
+
+  BeamSearchCpuDeviceHelper::AddToFeeds(expanded_inputs, expanded_position_ids, expanded_attention_mask, feeds);
+
+#ifdef DEBUG_BEAM_SEARCH
+  const custombsop::IConsoleDumper* dumper = GetConsoleDumper();
+  dumper->Print("Here are input_ids", ort_.GetTensorData<int32_t>(expanded_inputs), parameters_.batch_size*parameters_.num_beams, parameters_.sequence_length);
+  dumper->Print("position_ids", ort_.GetTensorData<int32_t>(expanded_position_ids), parameters_.batch_size*parameters_.num_beams, parameters_.sequence_length);
+  dumper->Print("attention_mask", ort_.GetTensorData<int32_t>(expanded_attention_mask), parameters_.batch_size*parameters_.num_beams, parameters_.sequence_length);
+#endif
+
+  BeamSearchState<T> beam_state;
+  beam_state.Init(ort_allocator,
+                  parameters_.batch_size,
+                  parameters_.num_beams,
+                  parameters_.vocab_size,
+                  parameters_.sequence_length,
+                  parameters_.max_length,
+                  parameters_.output_scores);
+
+  cpu_state.sequences.Init(cpu_state.sequences_space,
+                          parameters_.BatchBeamSize(),
+                          parameters_.sequence_length,
+                          parameters_.max_length);
+
+  gsl::span<const int32_t> input_ids = gsl::make_span(ort_.GetTensorData<int32_t>(expanded_inputs), 
+                                                      size_t(parameters_.batch_size) * parameters_.num_beams *  parameters_.sequence_length);
+
+  init_beam_state_func_(&beam_state,
+                        &cpu_state,
+                        cpu_state.sequence_lengths,
+                        parameters_.batch_size,
+                        parameters_.num_beams,
+                        input_ids,
+                        parameters_.sequence_length,
+                        parameters_.max_length,
+                        cuda_stream_);
 
   /*
   //TODO Remove Debugs to print expanded inputs
@@ -358,7 +481,7 @@ void SetBeamSearchOutputToZero(OrtKernelContext* context, Ort::CustomOpApi &ort,
   OrtTensorTypeAndShapeInfo* output_info1 = ort.GetTensorTypeAndShape(output1);
   std::vector<int64_t> tensor_shape = ort.GetTensorShape(output_info1);
 
-#ifdef PRINT_TO_CONSOLE
+#ifdef DEBUG_BEAM_SEARCH
   std::cout<<"Tensor shape of first output of custom bs OP"<<std::endl;
   for (int i=0;i<tensor_shape.size();i++){
     std::cout<<tensor_shape[i]<<",";
@@ -401,8 +524,8 @@ OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &a
   OrtAllocator *ortallocator;
   api.GetAllocatorWithDefaultOptions(&ortallocator);
 
-
   void* thread_pool = ort.KernelContext_GetThreadPool(context);
+  void* cuda_stream_ = nullptr;
 
   BeamSearchImpl<float>impl{api,
                             ort,
@@ -410,15 +533,15 @@ OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &a
                             //*session_state,
                             //*gpt_subgraph_,
                             thread_pool,
-                            //cuda_stream_,
+                            cuda_stream_,
                             //dumper_,
                             parameters,
                             //std::make_unique<OrtAllocator>(*ortmemoryinfo),
                             BeamSearchCpuDeviceHelper::CreateInputs,
-                            BeamSearchCpuDeviceHelper::AddToFeeds};
+                            BeamSearchCpuDeviceHelper::AddToFeeds,
                             //topk_func_ ? topk_func_ : BeamSearchCpuDeviceHelper::TopK,
                             //BeamsearchCpuDeviceHelper::ProcessLogits<float>,
-                            //init_beam_state_func_ ? init_beam_state_func_ : BeamSearchCpuDeviceHelper::InitBeamState<float>,
+                            BeamSearchCpuDeviceHelper::InitBeamState<float>};
                             //device_copy_func_ ? device_copy_func_ : BeamSearchCpuDeviceHelper::DeviceCopy<float>,
                             //update_feeds_func_ ? update_feeds_func_ : BeamSearchCpuDeviceHelper::UpdateFeeds<float>};
   OrtStatusPtr status_ptr = impl.Initialize();
@@ -431,7 +554,7 @@ OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &a
   const OrtValue* input_ids_tensor = ort.KernelContext_GetInput(context, 0);
   const int* input_ids = ort.GetTensorData<int>(input_ids_tensor);
   
-  impl.Execute(context, input_ids_tensor, ortallocator, ortmemoryinfo);
+  return impl.Execute(context, input_ids_tensor, ortallocator, ortmemoryinfo);
 
   OrtTensorTypeAndShapeInfo* input_ids_info = ort.GetTensorTypeAndShape(input_ids_tensor);
   std::vector<int64_t> tensor_shape = ort.GetTensorShape(input_ids_info);
@@ -445,7 +568,7 @@ OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &a
   const int* max_length = ort.GetTensorData<int>(max_length_tensor);
 
   int iterations = max_length[0];
-#ifdef PRINT_TO_CONSOLE
+#ifdef DEBUG_BEAM_SEARCH
   std::cout<<"Batch_size:"<<batch_size<<std::endl;
   std::cout<<"Seq_len:"<<seq_len<<std::endl;
 #endif
@@ -557,3 +680,5 @@ OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &a
   //TODO set this with the actual return sequences
   SetBeamSearchOutputToZero(context, ort, batch_size, seq_len);
 }
+
+} //namespace custombsop

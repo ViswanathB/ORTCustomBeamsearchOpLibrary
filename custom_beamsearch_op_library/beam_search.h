@@ -9,6 +9,9 @@ using namespace std;
 #undef ORT_API_MANUAL_INIT
 
 #include "beam_search_parameters.h"
+#include "beam_search_shared.h"
 
 //#define PRINT_TO_CONSOLE
-OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort::CustomOpApi &ort, OrtSession *session, custombsop::BeamSearchParameters parameters);
+namespace custombsop {
+    OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort::CustomOpApi &ort, OrtSession *session, custombsop::BeamSearchParameters parameters);
+}

@@ -18,5 +18,4 @@ struct BeamSearchParameters : public IBeamSearchParameters {
 
   //void SetSubgraphParameters(int vocab_size, int num_heads, int head_size, int num_layers);
 };
-
 }  // namespace custombsop

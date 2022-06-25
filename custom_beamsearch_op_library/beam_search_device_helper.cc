@@ -1,8 +1,10 @@
 #include "beam_search_device_helper.h"
 #include "safeint.h"
+#include "gsl/span"
 #include "gsl/gsl"
 
 using namespace std;
+using namespace msl::utilities;
 
 namespace BeamSearchCpuDeviceHelper {
 
@@ -48,6 +50,58 @@ OrtValue* ExpandInputs(OrtApi &api, Ort::CustomOpApi &ort, OrtValue* input, int 
 
   return expanded;
 }
+
+template<typename T>
+void InitBeamState(custombsop::IBeamSearchState<T>* beam_state,
+                   custombsop::IBeamSearchCpuState* cpu_state,
+                   gsl::span<int32_t>& sequence_lengths,
+                   int batch_size,
+                   int num_beams,
+                   gsl::span<const int32_t> input_ids_in_cpu,
+                   int sequence_length,
+                   int max_length,
+                   void* /*stream*/) {
+  memset(beam_state->beam_scores.data(), 0, beam_state->beam_scores.size_bytes());
+  memset(beam_state->next_token_logits.data(), 0, beam_state->next_token_logits.size_bytes());
+  memset(beam_state->next_token_scores.data(), 0, beam_state->next_token_scores.size_bytes());
+  memset(beam_state->next_tokens.data(), 0, beam_state->next_tokens.size_bytes());
+  memset(beam_state->next_indices.data(), 0, beam_state->next_indices.size_bytes());
+  memset(beam_state->next_positions.data(), 0, beam_state->next_positions.size_bytes());
+
+  // Initialize score of first beam of each group with 0 and the rest with -1e9.
+  // This ensures that the beams in the same group don't produce same tokens every time.
+  gsl::span<float>& beam_scores = beam_state->beam_scores;
+  for (int i = 0; i < batch_size; i++) {
+    for (int j = 1; j < num_beams; j++) {
+      beam_scores[SafeInt<gsl::index>(i) * num_beams + j] = -1e9;
+    }
+  }
+
+  gsl::copy(sequence_lengths, beam_state->next_positions);
+
+  memset(cpu_state->sequences_space.data(), 0, cpu_state->sequences_space.size_bytes());
+
+  // Copy input_ids to sequences[0].
+  gsl::span<int32_t> sequences_0 = cpu_state->sequences_space;
+  int batch_beam_size = batch_size * num_beams;
+  for (int i = 0; i < batch_beam_size; i++) {
+    for (int j = 0; j < sequence_length; j++) {
+      sequences_0[SafeInt<gsl::index>(i) * max_length + j] = static_cast<int32_t>(input_ids_in_cpu[SafeInt<gsl::index>(i) * sequence_length + j]);
+    }
+  }
+}
+
+// Explicit template instantiations of functions
+template void InitBeamState<float>(
+    custombsop::IBeamSearchState<float>* beam_state,
+    custombsop::IBeamSearchCpuState* cpu_state,
+    gsl::span<int32_t>& sequence_lengths,
+    int batch_size,
+    int num_beams,
+    gsl::span<const int32_t> input_ids_in_cpu,
+    int sequence_length,
+    int max_length,
+    void* stream);
 
 OrtStatusPtr CreateInputs(OrtApi &api,
                           Ort::CustomOpApi &ort,

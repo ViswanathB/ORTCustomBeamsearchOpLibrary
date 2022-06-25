@@ -33,16 +33,20 @@ file(COPY ${ORT_HEADER_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 file(COPY ${CUSTOMBEAMSEARCHOPLIB_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search.cc"
      "${CMAKE_CURRENT_BINARY_DIR}/utils.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_shared.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.cc"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_scorer.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_scorer.cc"
+     "${CMAKE_CURRENT_BINARY_DIR}/sequences.h"
+     "${CMAKE_CURRENT_BINARY_DIR}/sequences.cc"
+     "${CMAKE_CURRENT_BINARY_DIR}/dump_tensor.h"
+     "${CMAKE_CURRENT_BINARY_DIR}/dump_tensor.cc"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.cc")
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.cc"
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search.h"
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search.cc")
 
 add_library(custom_beamsearch_op_library_cpu SHARED
     ${CMAKE_CURRENT_BINARY_DIR}/custom_beamsearch_op_library_cpu.cc

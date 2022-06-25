@@ -1,13 +1,15 @@
 #pragma once
-#include "gsl/gsl"
+#include <stdint.h>
+#include "gsl/span"
 
 #define ORT_API_MANUAL_INIT
 #include "onnxruntime_cxx_api.h"
 #undef ORT_API_MANUAL_INIT
-
 #include "utils.h"
 
 namespace custombsop {
+
+#define DEBUG_BEAM_SEARCH 1
 
 template <typename T>
 struct IBeamSearchState {
@@ -95,6 +97,29 @@ struct IBeamSearchParameters {
   int num_heads;
   int head_size;
   int num_layers;
+};
+
+class IConsoleDumper {
+ public:
+  IConsoleDumper() : is_enabled_(true) {}
+  virtual ~IConsoleDumper() {}
+  void Disable() { is_enabled_ = false; }
+  bool IsEnabled() const { return is_enabled_; }
+  virtual void Print(const char* name, const float* tensor, int dim0, int dim1) const = 0;
+  //virtual void Print(const char* name, const MLFloat16* tensor, int dim0, int dim1) const = 0;
+  virtual void Print(const char* name, const int64_t* tensor, int dim0, int dim1) const = 0;
+  virtual void Print(const char* name, const int32_t* tensor, int dim0, int dim1) const = 0;
+  virtual void Print(const char* name, const float* tensor, int dim0, int dim1, int dim2) const = 0;
+  //virtual void Print(const char* name, const MLFloat16* tensor, int dim0, int dim1, int dim2) const = 0;
+  virtual void Print(const char* name, const int64_t* tensor, int dim0, int dim1, int dim2) const = 0;
+  virtual void Print(const char* name, const int32_t* tensor, int dim0, int dim1, int dim2) const = 0;
+  //virtual void Print(const char* name, const Tensor& value) const = 0;
+  //virtual void Print(const char* name, const OrtValue& value) const = 0;
+  //virtual void Print(const char* name, int index, bool end_line) const = 0;
+  //virtual void Print(const char* name, const std::string& value, bool end_line) const = 0;
+
+ protected:
+  bool is_enabled_;
 };
 
 }  // namespace custombsop

@@ -5,6 +5,11 @@
 2. Successful conversion of the model to custom beam search OP using steps in [Convert Script](#convert-script). 
 3. 
 
+### TODO
+1. In lot of places, I have removed SafeInt<>, since this was a derivation from ORT. 
+However this can be replaced with the library from msl::utilities::
+2. Output scores in not supported as 3rd input now, this should be added as contrib op supports this. 
+ 
 ### TBD
 CustomOpApi is a wrapper around OrtAPI -> THIS IS good way to reduce the number of variables the user has to define.
 Write more of these for customOp api if needed. only thing we will be passing around CustomOpApi instead of ORtAPI.
