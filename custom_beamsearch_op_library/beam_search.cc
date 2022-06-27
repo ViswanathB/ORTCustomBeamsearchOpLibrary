@@ -431,6 +431,12 @@ OrtStatusPtr BeamSearchImpl<T>::Execute(OrtKernelContext* context, const OrtValu
                         parameters_.max_length,
                         cuda_stream_);
 
+  OrtValue *position_ids;
+  std::vector<int64_t> position_ids_dims{parameters_.BatchBeamSize(), 1};
+  api_.CreateTensorWithDataAsOrtValue(ortmemoryinfo, beam_state.next_positions.data(), size_t(4)*parameters_.BatchBeamSize(), position_ids_dims.data(),
+      position_ids_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &position_ids);
+
+
   /*
   //TODO Remove Debugs to print expanded inputs
   int32_t* expanded_inputs_data = ort_.GetTensorMutableData<int32_t>(expanded_inputs);

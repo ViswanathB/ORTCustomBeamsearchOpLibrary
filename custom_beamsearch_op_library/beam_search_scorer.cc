@@ -48,6 +48,37 @@ bool BeamHypotheses::IsDone(float best_sum_logprobs, int current_length) {
   return worst_score_ >= current_score;
 }
 
+void BeamHypotheses::Output(
+    int top_k,
+    int max_length,
+    gsl::span<int32_t>& sequences,       // buffer filled with pad token ID, shape (num_return_sequences, max_length)
+    gsl::span<float>& sequences_scores)  // buffer of shape (num_return_sequences) or empty
+{
+  CUSTOMOP_ENFORCE(top_k <= Size());
+  int remove_count = Size() - top_k;
+  for (int i = 0; i < remove_count; i++) {
+    beams_.pop();
+  }
+
+  // Since pop get the worst sequence, so output it in the reverse order.
+  // The frist (worst) beam shall be put at the last position among top_k sequences.
+  int index = top_k - 1;
+  while (!beams_.empty()) {
+    auto item = beams_.top();
+    gsl::span<const int32_t>& source = item.hypothesis;
+    gsl::span<int32_t> target = sequences.subspan(static_cast<gsl::index>(index) * max_length, max_length);
+
+    // Note that word_ids might be less than max_length.
+    // Since the sequences has been filled with pad token ID, so padding is not needed here.
+    gsl::copy(source, target);
+
+    if (!sequences_scores.empty())
+      sequences_scores[index] = item.score;
+
+    beams_.pop();
+    index--;
+  }
+}
 
 BeamSearchScorer::BeamSearchScorer(size_t batch_size,
                                    size_t num_beams,
@@ -104,13 +135,151 @@ void BeamSearchScorer::Process(ISequences* sequences,
                        gsl::span<const float>& next_scores,
                        gsl::span<const int32_t>& next_tokens,
                        gsl::span<const int32_t>& next_indices) {
+  // Sequences shape is (batch_size * num_beams, total_sequence_length)
+  // It contains word ID of whole sequence generated so far.
+  // It is different from subgraph input_ids, which only need one word when past state is not empty.
+  const int sequence_length = sequences->GetSequenceLength();
 
+  CUSTOMOP_ENFORCE(next_scores.size() == next_tokens.size());
+  CUSTOMOP_ENFORCE(next_scores.size() == next_indices.size());
+
+  for (size_t batch = 0; batch < batch_size_; batch++) {
+    BeamHypotheses& beam_hyp = beam_hyps_[batch];
+    if (done_[batch]) {
+      CUSTOMOP_ENFORCE(beam_hyp.Size() >= gsl::narrow_cast<int>(num_beams_), "Batch can only be done if all beams have been generated");
+
+      // Pad the batch.
+      for (size_t j = 0; j < num_beams_; j++) {
+        next_beam_scores_[batch * num_beams_ + j] = 0.0f;
+        next_beam_tokens_[batch * num_beams_ + j] = pad_token_id_;
+        next_beam_indices_[batch * num_beams_ + j] = 0;
+      }
+      continue;
+    }
+
+    // Next tokens for this sentence.
+    size_t beam_idx = 0;
+    size_t top_k = 2 * num_beams_;
+    for (size_t j = 0; j < top_k; j++) {
+      int32_t next_token = next_tokens[batch * top_k + j];
+      float next_score = next_scores[batch * top_k + j];
+      int32_t next_index = next_indices[batch * top_k + j];
+
+      int batch_beam_idx = static_cast<int>(batch * num_beams_) + next_index;
+      // Add to generated hypotheses if end of sentence.
+      if ((eos_token_id_ >= 0) && (next_token == eos_token_id_)) {
+        bool is_beam_token_worse_than_top_num_beams = (j >= num_beams_);
+        if (is_beam_token_worse_than_top_num_beams) {
+          continue;
+        }
+
+        // Clone the sequence and append to buffer.
+        gsl::span<const int32_t> src = sequences->GetSequence(batch_beam_idx);
+        auto clone = hypothesis_buffer_.subspan(hypothesis_buffer_offset_, sequence_length);
+        gsl::copy(src, clone);
+        hypothesis_buffer_offset_ += static_cast<size_t>(sequence_length);
+        //TODO as_const if from std, but is it from gsl??
+        //auto sequence = clone.template as_span<const int32_t>();
+        auto sequence = gsl::span<const int32_t>(std::as_const(clone));
+        beam_hyp.Add(sequence, next_score);
+      } else {
+        // Add next predicted token since it is not eos_token.
+        next_beam_scores_[batch * num_beams_ + beam_idx] = next_score;
+        next_beam_tokens_[batch * num_beams_ + beam_idx] = next_token;
+        next_beam_indices_[batch * num_beams_ + beam_idx] = batch_beam_idx;
+        ++beam_idx;
+      }
+
+      // Once the beam for next step is full, don't add more tokens to it.
+      if (beam_idx == num_beams_)
+        break;
+    }
+
+    CUSTOMOP_ENFORCE(beam_idx == num_beams_);
+    CUSTOMOP_ENFORCE(hypothesis_buffer_offset_ <= batch_size_ * num_beams_ * max_length_);
+
+    //  Check if we are done so that we can save a pad step if all(done)
+    if (!done_[batch]) {
+      gsl::span<const float> topk_scores = next_scores.subspan(batch * num_beams_, top_k);
+      //TODO std::max_element throws an issue with lastest gsl, it is returning an iterator
+      //instead of a pointer
+      float best_sum_logprobs = topk_scores[0];
+      for (int topk_i=1; topk_i < top_k; topk_i++) {
+        if (best_sum_logprobs < topk_scores[topk_i]) {
+          best_sum_logprobs = topk_scores[topk_i];
+        }
+      }
+      //std::max_element(topk_scores.begin(), topk_scores.end());
+
+      if (beam_hyp.IsDone(best_sum_logprobs, sequence_length)) {
+        done_[batch] = true;
+      }
+    }
+  }
 }
 
-void BeamSearchScorer::Finalize(ISequences* sequences,
+void BeamSearchScorer::Finalize(
+                        OrtApi &api,
+                        Ort::CustomOpApi &ort,
+                        ISequences* sequences,
                         gsl::span<const float>& final_beam_scores,
                         OrtValue* output_sequences,
                         OrtValue* output_sequence_scores) {
+  CUSTOMOP_ENFORCE(sequences != nullptr);
+  CUSTOMOP_ENFORCE(output_sequences != nullptr);
 
+  // Finalize all open beam hypotheses and add to generated hypotheses.
+  for (size_t batch_index = 0; batch_index < batch_size_; batch_index++) {
+    BeamHypotheses& beam_hyp = beam_hyps_[batch_index];
+    if (done_[batch_index]) {
+      continue;
+    }
+
+    for (size_t beam_index = 0; beam_index < num_beams_; beam_index++) {
+      size_t batch_beam_index = batch_index * num_beams_ + beam_index;
+      float final_score = final_beam_scores[batch_beam_index];
+      auto final_tokens = sequences->GetSequence(batch_beam_index);
+      beam_hyp.Add(final_tokens, final_score);
+    }
+  }
+
+  // Word IDs of each sequence, with shape (batch_size * num_return_sequences, max_sequence_length).
+  int32_t* output_sequences_data = ort.GetTensorMutableData<int32_t>(output_sequences);
+  OrtTensorTypeAndShapeInfo* output_sequences_info = ort.GetTensorTypeAndShape(output_sequences);
+  std::vector<int64_t> output_sequences_shape = ort.GetTensorShape(output_sequences_info);
+  gsl::span<int32_t> output = gsl::make_span(output_sequences_data, SizeHelper(output_sequences_shape));
+
+  // Fill output sequences with pad token ID so that we do not need append it later.
+  std::fill_n(output.data(), output.size(), pad_token_id_);
+
+  // Score of each sequence, with shape (batch_size * num_return_sequences).
+  gsl::span<float> sequence_scores;
+  if (output_sequence_scores != nullptr) {
+    float* output_sequence_scores_data = ort.GetTensorMutableData<float>(output_sequence_scores);
+    OrtTensorTypeAndShapeInfo* output_sequence_scores_info = ort.GetTensorTypeAndShape(output_sequence_scores);
+    std::vector<int64_t> output_sequences_scores_shape = ort.GetTensorShape(output_sequence_scores_info);
+    sequence_scores = gsl::make_span(output_sequence_scores_data, SizeHelper(output_sequences_scores_shape));
+  }
+
+  // Span is empty when output_sequence_scores is NULL.
+  gsl::span<float> batch_sequence_score;
+
+  // Select the best hypotheses according to number of sequences to return.
+  for (size_t batch_index = 0; batch_index < batch_size_; batch_index++) {
+    BeamHypotheses& beam_hyp = beam_hyps_[batch_index];
+
+    const size_t num_return_sequences = num_beam_hyps_to_keep_;
+    auto batch_output = output.subspan(batch_index * num_return_sequences * max_length_, num_return_sequences * max_length_);
+
+    if (output_sequence_scores != nullptr) {
+      batch_sequence_score = sequence_scores.subspan(batch_index * num_return_sequences, num_return_sequences);
+    }
+
+    beam_hyp.Output(
+        num_return_sequences,
+        max_length_,
+        batch_output,
+        batch_sequence_score);
+  }
 }
 } //namespace custombsop

@@ -25,6 +25,8 @@ beam_search.cc doesn't have subgraph any more, so parameters that are copied fro
 
 AllocateBuffer uses ptr from stack and later moves to a pointer -> is this OK??
 
+The heap memory is used for all the buffers instead of ort_allocator, there should not be any difference, since ort_allocator also allocates
+
 
 ### Convert script 
 Use [create_beam_search.py](create_beam_search.py) to create the custom beam search OP. It takes in the inputs needed to make the path. This doesn't validate that the model is converted, it has to run a session with the model - add this test case. 

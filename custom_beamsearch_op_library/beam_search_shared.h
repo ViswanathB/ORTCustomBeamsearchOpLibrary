@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include "gsl/span"
+#include <algorithm>
 
 #define ORT_API_MANUAL_INIT
 #include "onnxruntime_cxx_api.h"
@@ -61,7 +62,9 @@ class IBeamScorer {
                        gsl::span<const int32_t>& next_tokens,
                        gsl::span<const int32_t>& next_indices) = 0;
 
-  virtual void Finalize(ISequences* sequences,
+  virtual void Finalize(OrtApi &api,
+                        Ort::CustomOpApi &ort,
+                        ISequences* sequences,
                         gsl::span<const float>& final_beam_scores,
                         OrtValue* output_sequences,
                         OrtValue* output_sequence_scores) = 0;

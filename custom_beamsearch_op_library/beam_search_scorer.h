@@ -1,4 +1,5 @@
 #include <queue>
+#include "utils.h"
 #include "beam_search_shared.h"
 
 using namespace std;
@@ -69,7 +70,9 @@ class BeamSearchScorer : public IBeamScorer {
                gsl::span<const int32_t>& next_tokens,
                gsl::span<const int32_t>& next_indices) override;
 
-  void Finalize(ISequences* sequences,
+  void Finalize(OrtApi &api,
+                Ort::CustomOpApi &ort,
+                ISequences* sequences,
                 gsl::span<const float>& final_beam_scores,
                 OrtValue* output_sequences,
                 OrtValue* output_sequence_scores) override;
