@@ -19,6 +19,44 @@ using CreateInputsFunc = std::function<OrtStatusPtr(
     OrtValue** expanded_position_ids,
     OrtValue** expanded_attention_mask)>;
 
+template <typename T>
+using ProcessLogitsFunc = std::function<OrtStatusPtr(
+    OrtKernelContext* context,
+    OrtApi &api,
+    Ort::CustomOpApi &ort,
+    const OrtValue &logits,                                 // logits output of subgraph
+    custombsop::IBeamSearchState<T>* beam_state,            // state
+    custombsop::IBeamSearchCpuState* cpu_state,             // state in CPU
+    custombsop::ISequences* sequences,                      // sequences
+    OrtAllocator* ort_allocator,                            // default allocator
+    void* thread_pool,                                      // thread pool (for CPU only)
+    custombsop::ILogitsProcessorList* logits_processors,    // logits processors
+    custombsop::IBeamScorer* beam_scorer,                   // beam scorer
+    custombsop::IBeamSearchParameters* parameters,          // parameters
+    int step,                                               // iteration counter
+    void* stream,                                           // cuda stream (for CUDA only)
+    const custombsop::IConsoleDumper *dumper,                     // tensor dumper
+    std::unordered_map<std::string, OrtOp*> &ops_map)>;
+    
+template <typename T>
+using UpdateFeedsFunc = std::function<OrtStatusPtr(
+    OrtApi &api,
+    Ort::CustomOpApi &ort,
+    OrtMemoryInfo *ortmemoryinfo,
+    OrtAllocator* ort_allocator,
+    void* stream,
+    //TODO make this const since we don't want to change last_outputs inside this function
+    std::vector<OrtValue*>& last_outputs,
+    std::vector<OrtValue*>& next_inputs,
+    int current_length,
+    OrtValue* position_ids,
+    gsl::span<const int32_t> beam_next_tokens,
+    gsl::span<const int32_t> beam_indices,
+    int num_beams,
+    int gpt_subgraph_first_past_input_idx,
+    int gpt_subgraph_first_present_output_idx,
+    const custombsop::IConsoleDumper* dumper)>;
+
 using AddToFeedsFunc = std::function<OrtStatusPtr(
     OrtValue* input_ids,
     OrtValue* position_ids,
@@ -52,11 +90,48 @@ OrtStatusPtr CreateInputs(
     OrtValue** expanded_position_ids,
     OrtValue** expanded_attention_mask);
 
+template <typename T>
+OrtStatusPtr ProcessLogits(
+                    OrtKernelContext *context,
+                    OrtApi &api,
+                    Ort::CustomOpApi &ort,
+                    const OrtValue &logits,                               // logits output of subgraph
+                    custombsop::IBeamSearchState<T>* beam_state,          // state
+                    custombsop::IBeamSearchCpuState* cpu_state,           // state in CPU
+                    custombsop::ISequences* sequences,                    // sequences
+                    OrtAllocator* ort_allocator,                          // default allocator
+                    void* thread_pool,                                    // thread pool (for CPU only)
+                    custombsop::ILogitsProcessorList* logits_processors,  // logits processors
+                    custombsop::IBeamScorer* beam_scorer,                 // beam scorer
+                    custombsop::IBeamSearchParameters* parameters,        // parameters
+                    int step,                                             // iteration counter
+                    void* stream,                                         // cuda stream (for CUDA only)
+                    const custombsop::IConsoleDumper *dumper,                   // tensor dumper
+                    std::unordered_map<std::string, OrtOp*> &ops_map);
+            
 OrtStatusPtr AddToFeeds(
     OrtValue* input_ids,
     OrtValue* position_ids,
     OrtValue* attention_mask,
     std::vector<OrtValue*>& feeds);
+
+template <typename T>
+OrtStatusPtr UpdateFeeds(
+    OrtApi &api,
+    Ort::CustomOpApi &ort,
+    OrtMemoryInfo *ortmemoryinfo,
+    OrtAllocator* ort_allocator,
+    void* stream,
+    std::vector<OrtValue*>& last_outputs,
+    std::vector<OrtValue*>& next_inputs,
+    int current_length,
+    OrtValue* position_ids,
+    gsl::span<const int32_t> beam_next_tokens,
+    gsl::span<const int32_t> beam_indices,
+    int num_beams,
+    int gpt_subgraph_first_past_input_idx,
+    int gpt_subgraph_first_present_output_idx,
+    const custombsop::IConsoleDumper* dumper);
 
 template<typename T>
 void InitBeamState(custombsop::IBeamSearchState<T>* beam_state,

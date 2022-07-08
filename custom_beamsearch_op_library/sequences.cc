@@ -40,6 +40,10 @@ void Sequences::PrintSequences(const IConsoleDumper* dumper) const {
     dumper->Print("sequences", sequence.data(), 1, current_length_);
   }
 }
+#else
+void Sequences::PrintSequences(const IConsoleDumper* /*dumper*/) const {
+
+}
 #endif
 
 void Sequences::AppendNextTokenToSequences(

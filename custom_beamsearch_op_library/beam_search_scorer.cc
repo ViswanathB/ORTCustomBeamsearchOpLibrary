@@ -103,7 +103,15 @@ BeamSearchScorer::BeamSearchScorer(size_t batch_size,
             //beam_hyps_.push_back(BeamHypotheses(num_beams, length_penalty, early_stopping, hypothesis_score_allocator));
             beam_hyps_.push_back(BeamHypotheses(num_beams, length_penalty, early_stopping));
         }
-    }    
+    }
+
+bool BeamSearchScorer::IsDone() {
+  for (size_t batch = 0; batch < batch_size_; batch++) {
+    if (!done_[batch])
+      return false;
+  }
+  return true;
+}
 
 void BeamSearchScorer::Initialize(OrtAllocator* ort_allocator, int sequence_length) {
   CUSTOMOP_ENFORCE(next_beam_scores_.empty());  // Make sure this is called only once.

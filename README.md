@@ -8,12 +8,17 @@
 ### TODO
 1. In lot of places, I have removed SafeInt<>, since this was a derivation from ORT. 
 However this can be replaced with the library from msl::utilities::
-2. Output scores in not supported as 3rd input now, this should be added as contrib op supports this. 
- 
+2. Output scores in not supported as 3rd input now, this should be added as contrib op supports this.
+3. GetConsoleDumper() is not used everywhere with DEBUG_BEAM_SEARCH, sometimes directly accessing cpu_dumper_ -> use the other one, since on GPU
+it will fail. 
+4. Ort_allocator is used to create OrtValue in number of places. Where is this released, how can this be released? OrtValue* is not a smart pointer by default.
+5. std::move() doesn't matter for a pointer if it is not unique_ptr -> remove these from the code base. 
+6. Some of the templates functions use DataType(T) to know what kind of memory to allocate, this happens are more than one place
+search for "TODO datatypeimpl" where all this was replaced.
+
 ### TBD
 CustomOpApi is a wrapper around OrtAPI -> THIS IS good way to reduce the number of variables the user has to define.
 Write more of these for customOp api if needed. only thing we will be passing around CustomOpApi instead of ORtAPI.
-
 
 This is a custom OP to run beam search over a given model. The input to the application would be input ids as shown in the ONNX model.
 However, not all the inputs are utilized?? Why do they have to be utilized?

@@ -46,7 +46,10 @@ file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.cc"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search.cc")
+     "${CMAKE_CURRENT_BINARY_DIR}/beam_search.cc"
+     "${CMAKE_CURRENT_BINARY_DIR}/logits_processor.h"
+     "${CMAKE_CURRENT_BINARY_DIR}/logits_processor.cc"
+     )
 
 add_library(custom_beamsearch_op_library_cpu SHARED
     ${CMAKE_CURRENT_BINARY_DIR}/custom_beamsearch_op_library_cpu.cc

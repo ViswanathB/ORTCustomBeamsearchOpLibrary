@@ -42,13 +42,11 @@ class ISequences {
   virtual int GetSequenceLength() const = 0;
 };
 
-/*
 class ILogitsProcessorList {
  public:
   virtual ~ILogitsProcessorList() {}
   virtual void Process(const ISequences* sequences, gsl::span<float>& next_token_scores, int step) = 0;
 };
-*/
 
 // Interface for all scorers for beam search or beam sample.
 class IBeamScorer {

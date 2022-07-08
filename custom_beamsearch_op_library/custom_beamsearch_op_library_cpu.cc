@@ -4,6 +4,8 @@
 #include <cmath>
 #include <mutex>
 #include <iostream>
+#include <unordered_map>
+
 #include "beam_search.h"
 #ifdef _WIN32
 #include <Windows.h>
@@ -100,7 +102,7 @@ struct CustomBeamsearchOpKernel {
       status = api_.KernelInfoGetAttribute_string(info, "model_path", c_model_path, &model_path_len_);
       if (status != nullptr)
       {
-        ORT_CXX_API_THROW("Couldn't find model_path attribute in CustomBeamsearchOpKernel", ORT_FAIL);
+        ORT_CXX_API_THROW("Couldn't find model_path attribute in CustomBeamsearchOpKernel Constructor", ORT_FAIL);
       }
 
       model_path_ = new wchar_t[model_path_len_];
@@ -112,6 +114,74 @@ struct CustomBeamsearchOpKernel {
     session_ = nullptr;
 
     parameters_.ParseFromAttributes(ort_, info);
+    OrtOp* op_topk = InitTopK(info);
+
+    if (op_topk == nullptr) {
+      ORT_CXX_API_THROW("Couldn't create topk OP in CustomBeamsearchOpKernel Constructor", ORT_RUNTIME_EXCEPTION);
+    }
+    contrib_kernels_[std::string("topk")] = op_topk;
+
+    OrtOp* op_softmax = InitLogSoftMax(info);
+    if (op_softmax == nullptr) {
+      ORT_CXX_API_THROW("Couldn't create softmax OP in CustomBeamsearchOpKernel Constructor", ORT_RUNTIME_EXCEPTION);
+    }
+    contrib_kernels_[std::string("softmax")] = op_softmax;    
+  }
+
+  OrtOp* InitLogSoftMax(const OrtKernelInfo* info) {
+    const char* type_constraint_names[1] = {"T"};
+    int type_constraint_values[1] = {1};
+
+    int64_t axis_value = 1;
+    OrtOpAttr* axis = ort_.CreateOpAttr("axis", &axis_value, 1, OrtOpAttrType::ORT_OP_ATTR_INT);
+
+    if (!axis) {
+      ORT_CXX_API_THROW("Failed to create attributes for InitLogSoftMax", ORT_RUNTIME_EXCEPTION);
+    }
+
+    OrtOpAttr* top_attrs[1] = {axis};
+    OrtOp* op_lsm_ = ort_.CreateOp(info, "LogSoftmax", "", 13,
+                  (const char**)type_constraint_names,
+                  (const ONNXTensorElementDataType*)type_constraint_values,
+                  1, top_attrs, 1, 1, 1);
+
+    ort_.ReleaseOpAttr(axis);
+
+    return op_lsm_;
+
+  }
+
+  OrtOp* InitTopK(const OrtKernelInfo* info) {
+    const char* type_constraint_names[2] = {"T", "I"};
+    int type_constraint_values[2] = {1, 7};
+
+    // logits with num_beams will have the dimension: (batch_size, num_beams * vocab_size)
+    // TopK will be extracted for each batch and the index would be [0, num_beams * vocab_size] for each batch
+    // this is later converted in the range [0, vocab_size] for a particular beam, ProcessLogits() has this.
+    int64_t axis_value = 1;
+    OrtOpAttr* axis = ort_.CreateOpAttr("axis", &axis_value, 1, OrtOpAttrType::ORT_OP_ATTR_INT);
+
+    int64_t largest_value = 1;  // return in ascending order
+    OrtOpAttr* largest = ort_.CreateOpAttr("largest", &largest_value, 1, OrtOpAttrType::ORT_OP_ATTR_INT);
+
+    int64_t sorted_value = 1;
+    OrtOpAttr* sorted = ort_.CreateOpAttr("sorted", &sorted_value, 1, OrtOpAttrType::ORT_OP_ATTR_INT);
+
+    if (!axis || !largest || !sorted) {
+      ORT_CXX_API_THROW("Failed to create attributes for topk", ORT_RUNTIME_EXCEPTION);
+    }
+
+    OrtOpAttr* top_attrs[3] = {axis, largest, sorted};
+    OrtOp* op_topk_ = ort_.CreateOp(info, "TopK", "", 14,
+                  (const char**)type_constraint_names,
+                  (const ONNXTensorElementDataType*)type_constraint_values,
+                  2, top_attrs, 3, 2, 2);
+
+    ort_.ReleaseOpAttr(axis);
+    ort_.ReleaseOpAttr(largest);
+    ort_.ReleaseOpAttr(sorted);
+
+    return op_topk_;
   }
 
   void Compute(OrtKernelContext* context) {
@@ -140,10 +210,14 @@ struct CustomBeamsearchOpKernel {
       parameters_.num_heads = 16;
       parameters_.head_size = 64;
       parameters_.num_layers = 6;
-      OrtStatusPtr status = custombsop::RunBeamSearchOnInternalSession(context, api_, ort_, session_, parameters_);
+      OrtStatusPtr status = custombsop::RunBeamSearchOnInternalSession(context, api_, ort_, session_, parameters_, contrib_kernels_);
       if (status != nullptr) {
         ORT_CXX_API_THROW("run internal session failed:", api_.GetErrorCode(status));
       }
+    }
+
+    for(auto& it: contrib_kernels_) {
+      ort_.ReleaseOp(reinterpret_cast<OrtOp*>(it.second));
     }
   }
 
@@ -159,6 +233,9 @@ struct CustomBeamsearchOpKernel {
 
   //Parameters
   custombsop::BeamSearchParameters parameters_;
+
+  //Contrib Kernels
+  std::unordered_map<std::string, OrtOp*> contrib_kernels_;
 };
 
 struct CustomBeamsearchOp : Ort::CustomOpBase<CustomBeamsearchOp, CustomBeamsearchOpKernel> {

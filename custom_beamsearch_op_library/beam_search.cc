@@ -10,6 +10,7 @@
 #include "beam_search_scorer.h"
 #include "sequences.h"
 #include "dump_tensor.h"
+#include "logits_processor.h"
 #include "utils.h"
 
 using namespace std;
@@ -109,15 +110,15 @@ class BeamSearchImpl {
                  void* cuda_stream,
                  //IConsoleDumper* cuda_dumper,
                  custombsop::BeamSearchParameters &params,
-                 //OrtAllocator *ort_allocator,
+                 OrtAllocator *ort_allocator,
                  const BeamSearchDeviceHelper::CreateInputsFunc& create_inputs_func,
                  const BeamSearchDeviceHelper::AddToFeedsFunc& add_to_feeds_func,
                  //TODO next_thing_to_be_implemented.
                  //const BeamSearchDeviceHelper::TopkFunc& topk_func,
-                 //const BeamSearchDeviceHelper::ProcessLogitsFunc<T>& process_logits_func,
-                 const BeamSearchDeviceHelper::InitBeamStateFunc<T>& init_beam_state_func)
+                 const BeamSearchDeviceHelper::ProcessLogitsFunc<T>& process_logits_func,
+                 const BeamSearchDeviceHelper::InitBeamStateFunc<T>& init_beam_state_func,
                  //const BeamSearchDeviceHelper::DeviceCopyFunc<float>& device_copy_func,
-                 //const BeamSearchDeviceHelper::UpdateFeedsFunc<T>& update_feeds_func)
+                 const BeamSearchDeviceHelper::UpdateFeedsFunc<T>& update_feeds_func)
       : api_(api),
         ort_(ort),
         context_(context),
@@ -128,15 +129,15 @@ class BeamSearchImpl {
         cuda_stream_(cuda_stream),
         //cuda_dumper_(cuda_dumper),
         parameters_(params),
-        //cpu_allocator_(ort_allocator),
+        cpu_allocator_(ort_allocator),
         //temp_space_allocator_(nullptr),
         create_inputs_func_(create_inputs_func),
         add_to_feeds_func_(add_to_feeds_func),
         //topk_func_(topk_func),
-        //process_logits_func_(process_logits_func),
-        init_beam_state_func_(init_beam_state_func){
+        process_logits_func_(process_logits_func),
+        init_beam_state_func_(init_beam_state_func),
         //device_copy_func_(device_copy_func),
-        //update_feeds_func_(update_feeds_func) {
+        update_feeds_func_(update_feeds_func) {
 
     /*parameters_->ParseFromInputs(&context);
     cpu_allocator_ = session_state.GetExecutionProviders()
@@ -153,7 +154,12 @@ class BeamSearchImpl {
   // Execute beam search in iterations util stopping criteria is reached.
   // In each iteration, GPT subgraph is called, and next token for each sequence is generated.
   //Status Execute(const FeedsFetchesManager& feeds_fetches_manager);
-  OrtStatusPtr Execute(OrtKernelContext* context, const OrtValue *original_input_ids, OrtAllocator *ort_allocator, OrtMemoryInfo *ortmemoryinfo);
+  OrtStatusPtr Execute(
+    const OrtValue *original_input_ids,
+    OrtAllocator *ort_allocator,
+    OrtMemoryInfo *ortmemoryinfo,
+    OrtSession* session,
+    std::unordered_map<std::string, OrtOp*> &ops_map);
 
  private:
   bool IsCuda() const { return cuda_stream_ != nullptr; }
@@ -165,30 +171,32 @@ class BeamSearchImpl {
   //OrtStatusPtr CreateInitialFeeds(gsl::span<int32_t>& sequence_lengths, OrtValue& expanded_input_ids, std::vector<OrtValue>& feeds, IAllocatorUniquePtr<char>& buffer);
 
   // Update the input for next iteration.
-  /*Status UpdateFeeds(
-      const std::vector<OrtValue>& last_outputs,
-      std::vector<OrtValue>& next_inputs,
+  OrtStatusPtr UpdateFeeds(
+      OrtMemoryInfo *ortmemoryinfo,
+      std::vector<OrtValue*>& last_outputs,
+      std::vector<OrtValue*>& next_inputs,
       int current_length,
-      OrtValue& position_ids,
+      OrtValue* position_ids,
       gsl::span<const int32_t> beam_next_tokens,
       gsl::span<const int32_t> beam_indices);
-  */
+
   // Process logits and append next tokens to sequences.
-  /*
-  Status GenerateNextToken(const OrtValue& logits,
-                           gsl::span<int32_t>& beam_next_tokens,
-                           gsl::span<int32_t>& beam_indices,
-                           BeamSearchState<T>& beam_state,
-                           BeamSearchCpuState& cpu_state,
-                           int counter);
+  OrtStatusPtr GenerateNextToken(
+                          const OrtValue& logits,
+                          gsl::span<int32_t>& beam_next_tokens,
+                          gsl::span<int32_t>& beam_indices,
+                          BeamSearchState<T>& beam_state,
+                          BeamSearchCpuState& cpu_state,
+                          int counter,
+                          std::unordered_map<std::string, OrtOp*> &ops_map);
 
   // Calculate scores from logits, then apply filtering and select next token for each beam.
-  Status ProcessLogits(const OrtValue& logits,  // logits output of subgraph
+  OrtStatusPtr ProcessLogits(const OrtValue& logits,  // logits output of subgraph
                        BeamSearchState<T>& beam_state,
                        BeamSearchCpuState& cpu_state,
-                       AllocatorPtr& allocator,
-                       int counter);
-  */
+                       int counter,
+                       std::unordered_map<std::string, OrtOp*> &ops_map);
+
   const custombsop::IConsoleDumper* GetConsoleDumper() const { return IsCuda() ? cuda_dumper_ : &(cpu_dumper_); }
 
   OrtApi api_;
@@ -203,6 +211,10 @@ class BeamSearchImpl {
 
   void* thread_pool_;
 
+  int gpt_subgraph_first_past_input_idx_;
+
+  int gpt_subgraph_first_present_output_idx_;
+
   //const std::vector<const OrtValue*>& implicit_inputs_;
 
   void* cuda_stream_;
@@ -212,7 +224,7 @@ class BeamSearchImpl {
 
   custombsop::BeamSearchParameters parameters_;
 
-  //LogitsProcessorList logits_processors_;
+  LogitsProcessorList logits_processors_;
 
   std::unique_ptr<custombsop::BeamSearchScorer> beam_scorer_;
 
@@ -223,12 +235,64 @@ class BeamSearchImpl {
   BeamSearchDeviceHelper::CreateInputsFunc create_inputs_func_;
   BeamSearchDeviceHelper::AddToFeedsFunc add_to_feeds_func_;
   //BeamSearchDeviceHelper::TopkFunc topk_func_;
-  //BeamSearchDeviceHelper::ProcessLogitsFunc<T> process_logits_func_;
+  BeamSearchDeviceHelper::ProcessLogitsFunc<T> process_logits_func_;
   BeamSearchDeviceHelper::InitBeamStateFunc<T> init_beam_state_func_;
   //BeamSearchDeviceHelper::DeviceCopyFunc<float> device_copy_func_;
-  //BeamSearchDeviceHelper::UpdateFeedsFunc<T> update_feeds_func_;
+  BeamSearchDeviceHelper::UpdateFeedsFunc<T> update_feeds_func_;
 };
 
+template <typename T>
+OrtStatusPtr BeamSearchImpl<T>::ProcessLogits(
+    const OrtValue& logits,
+    BeamSearchState<T>& beam_state,
+    BeamSearchCpuState& cpu_state,
+    int counter,
+    std::unordered_map<std::string, OrtOp*> &ops_map) {
+  return process_logits_func_(context_, api_, ort_, logits, &beam_state, &cpu_state,
+                              &(cpu_state.sequences), cpu_allocator_, thread_pool_, &logits_processors_,
+                              beam_scorer_.get(), &parameters_, counter, nullptr, GetConsoleDumper(),
+                              ops_map);
+}
+
+template <typename T>
+OrtStatusPtr BeamSearchImpl<T>::GenerateNextToken(
+    const OrtValue& logits,
+    gsl::span<int32_t>& beam_next_tokens,
+    gsl::span<int32_t>& beam_indices,
+    BeamSearchState<T>& beam_state,
+    BeamSearchCpuState& cpu_state,
+    int counter,
+    std::unordered_map<std::string, OrtOp*> &ops_map) {
+  // Process logits to get next token scores
+  CUSTOMOP_RETURN_IF_ERROR(ProcessLogits(logits, beam_state, cpu_state, counter, ops_map));
+
+  gsl::span<float>& beam_scores = beam_scorer_->GetNextScores();
+  // It is optional to clone beam_scores. Change it to use same buffer also works for CPU:
+  //    beam_state.beam_scores = beam_scores
+  // Here we make a copy to reduce the coupling with little cost (the buffer size is small).
+  
+  //TODO This is good enough for CPU
+  // FOR CUDA might need something else
+  // ORT_RETURN_IF_ERROR(device_copy_func_(beam_state.beam_scores, beam_scores, cuda_stream_, DeviceCopyDirection::hostToDevice));
+  gsl::copy(beam_scores, beam_state.beam_scores);
+  
+  beam_next_tokens = beam_scorer_->GetNextTokens();
+  beam_indices = beam_scorer_->GetNextIndices();
+
+#ifdef DEBUG_BEAM_SEARCH
+  cpu_dumper_.Print("beam_scores after scorer", beam_scores.data(), parameters_.batch_size, parameters_.num_beams);
+  cpu_dumper_.Print("beam_next_tokens after scorer", beam_next_tokens.data(), parameters_.batch_size, parameters_.num_beams);
+  cpu_dumper_.Print("beam_indices after scorer", beam_indices.data(), parameters_.batch_size, parameters_.num_beams);
+#endif
+
+  cpu_state.sequences.AppendNextTokenToSequences(beam_indices, beam_next_tokens);
+
+#ifdef DEBUG_BEAM_SEARCH
+  cpu_state.sequences.PrintSequences(&cpu_dumper_);
+#endif
+
+ return nullptr;
+}
 
 template <typename T>
 OrtStatusPtr BeamSearchImpl<T>::CheckInputs(const OrtKernelContext* context) {
@@ -332,21 +396,45 @@ OrtStatusPtr BeamSearchImpl<T>::Initialize() {
   // This flag will be updated later when the scores output exists.
   parameters_.output_scores = false;
 
-  /*
+  //TODO is this flag even needed
   if (!IsCuda()) {
     // Logits processor is used in CPU only. In CUDA, cuda kernels are used instead.
     // Initialize processsors after CheckInputs so that parameters_->vocab_mask is ready.
-    logits_processors_.Init(*parameters_);
+    logits_processors_.Init(parameters_);
   }
-  */
 
+  //TODO this has to be extracted somewhere, mostly config file or when internal session is created.
+  gpt_subgraph_first_past_input_idx_ = 3;
+  gpt_subgraph_first_present_output_idx_ = 1;
+  
   return nullptr;
 }
 
 template <typename T>
-OrtStatusPtr BeamSearchImpl<T>::Execute(OrtKernelContext* context, const OrtValue *original_input_ids, OrtAllocator *ort_allocator, OrtMemoryInfo *ortmemoryinfo) {
-  std::cout<<"Calling create inputs:"<<std::endl;
+OrtStatusPtr BeamSearchImpl<T>::UpdateFeeds(
+    OrtMemoryInfo *ortmemoryinfo,
+    std::vector<OrtValue*>& last_outputs,
+    std::vector<OrtValue*>& next_inputs,
+    int current_length,
+    OrtValue* position_ids,
+    gsl::span<const int32_t> beam_next_tokens,
+    gsl::span<const int32_t> beam_indices) {
+  return update_feeds_func_(api_, ort_, ortmemoryinfo, cpu_allocator_, nullptr, last_outputs, next_inputs, current_length, position_ids,
+                            beam_next_tokens, beam_indices, parameters_.num_beams, gpt_subgraph_first_past_input_idx_,
+                            gpt_subgraph_first_present_output_idx_, GetConsoleDumper());
+}
 
+template <typename T>
+OrtStatusPtr BeamSearchImpl<T>::Execute(
+              const OrtValue *original_input_ids,
+              OrtAllocator *ort_allocator,
+              OrtMemoryInfo *ortmemoryinfo,
+              OrtSession* session,
+              std::unordered_map<std::string, OrtOp*> &ops_map) {
+#ifdef DEBUG_BEAM_SEARCH
+  std::cout<<"Calling create inputs:"<<std::endl;
+#endif
+/*
   std::vector<OrtValue*> outputs;
   OrtValue* sequences;
   size_t sequences_data_size = parameters_.batch_size * parameters_.num_return_sequences * parameters_.max_length;
@@ -363,6 +451,17 @@ OrtStatusPtr BeamSearchImpl<T>::Execute(OrtKernelContext* context, const OrtValu
   api_.CreateTensorWithDataAsOrtValue(ortmemoryinfo, sequences_scores_data.data(), size_t(4)*sequences_scores_data_size, sequences_scores_dims.data(),
       sequences_scores_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &sequences_scores);
   outputs.emplace_back(std::move(sequences_scores));
+*/
+  std::vector<int64_t> output1_dims;
+  output1_dims.push_back(parameters_.batch_size);
+  output1_dims.push_back(parameters_.num_return_sequences);
+  output1_dims.push_back(parameters_.max_length);
+  OrtValue* sequences = ort_.KernelContext_GetOutput(context_, 0, output1_dims.data(), output1_dims.size());
+
+  std::vector<int64_t> output2_dims;
+  output2_dims.push_back(parameters_.batch_size);
+  output2_dims.push_back(parameters_.num_return_sequences);
+  OrtValue* sequences_scores = ort_.KernelContext_GetOutput(context_, 1, output2_dims.data(), output2_dims.size());
 
   std::vector<OrtValue*> feeds;
   std::vector<OrtValue*> fetches;
@@ -436,32 +535,148 @@ OrtStatusPtr BeamSearchImpl<T>::Execute(OrtKernelContext* context, const OrtValu
   api_.CreateTensorWithDataAsOrtValue(ortmemoryinfo, beam_state.next_positions.data(), size_t(4)*parameters_.BatchBeamSize(), position_ids_dims.data(),
       position_ids_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &position_ids);
 
+  int current_length = parameters_.sequence_length;
+  int iteration_counter = 0;
+  int past_seq_len = 0;
+  int seq_len = current_length;
+  int batch_size = parameters_.batch_size;
+  int num_heads = parameters_.num_heads;
+  int head_size = parameters_.head_size;
 
-  /*
-  //TODO Remove Debugs to print expanded inputs
-  int32_t* expanded_inputs_data = ort_.GetTensorMutableData<int32_t>(expanded_inputs);
-  int32_t* expanded_position_ids_data = ort_.GetTensorMutableData<int32_t>(expanded_position_ids);
-  int32_t* expanded_attention_mask_data = ort_.GetTensorMutableData<int32_t>(expanded_attention_mask);
+  std::vector<const char*> input_names{"input_ids", "position_ids", "attention_mask", "past_0", "past_1", "past_2", "past_3", "past_4", "past_5"};
+  std::vector<int64_t> past_dims{2, batch_size*parameters_.num_beams, num_heads, 0, head_size};
+  std::vector<float> past_data;
+  
+  for (int i = 0; i < 6; i++) {
+    OrtValue *ort_past_data;
+    api_.CreateTensorWithDataAsOrtValue(ortmemoryinfo, past_data.data(), 0, past_dims.data(), past_dims.size(),
+        ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_past_data);
 
-  std::cout<<"ALL Expanded inputs:"<<std::endl;
-  for (int i = 0; i < parameters_.batch_size; i++) {
-    for (int j = 0; j < parameters_.num_beams;j++) {
-      for (int k = 0; k < parameters_.sequence_length;k++){
-        std::cout<<expanded_inputs_data[i*parameters_.num_beams + j*parameters_.sequence_length + k]<<",";
-      }
-      std::cout<<std::endl;
-      for (int k = 0; k < parameters_.sequence_length;k++){
-        std::cout<<expanded_position_ids_data[i*parameters_.num_beams + j*parameters_.sequence_length + k]<<",";
-      }
-      std::cout<<std::endl;
-      for (int k = 0; k < parameters_.sequence_length;k++){
-        std::cout<<expanded_attention_mask_data[i*parameters_.num_beams + j*parameters_.sequence_length + k]<<",";
-      }
-      std::cout<<std::endl;
+    feeds.emplace_back(std::move(ort_past_data));
+  }
+
+  std::vector<const char*> output_names{"logits", "present_0", "present_1", "present_2", "present_3", "present_4", "present_5"};
+  //std::vector<float> logits_data(batch_size * seq_len * 50263, 0);
+  std::vector<int64_t> logits_dims{batch_size, seq_len, 50263};
+  OrtValue* ortlogits;
+  api_.CreateTensorAsOrtValue(ort_allocator, logits_dims.data(), logits_dims.size(),
+                ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ortlogits);
+  fetches.emplace_back(ortlogits);
+
+  std::vector<int64_t> present_dims{2, batch_size, num_heads, seq_len, head_size};
+  for (int i = 0; i < 6; i++) {
+    OrtValue* ort_present;
+    // ort.present_1, ort.present_2, ort.present_3, ort.present_4, ort.present_5;
+    api_.CreateTensorAsOrtValue(ort_allocator, present_dims.data(), present_dims.size(), 
+                ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_present);
+    fetches.emplace_back(ort_present);
+  }
+  
+  while (current_length < parameters_.max_length) {
+    std::cout<<"Inside the beam search loop at iteration:" << iteration_counter+1<<std::endl;
+
+    iteration_counter ++;
+
+#ifdef DEBUG_BEAM_SEARCH
+    auto cur_len = std::to_string(current_length);
+    std::cout<<"CurrentLength:"<<cur_len<<std::endl;
+#endif
+
+    //TODO resuse the input and output buffers.
+    // All of them are actually from stack, how is this working?? Is the CreateTensorWithDataAsValue moving them to heap??
+    CUSTOMOP_RETURN_IF_ERROR(api_.Run(session, nullptr, input_names.data(), feeds.data(), 9, output_names.data(), 7, fetches.data()));
+
+#ifdef DEBUG_BEAM_SEARCH
+  cpu_dumper_.Print("logits", ort_.GetTensorMutableData<float>(fetches[0]), batch_size, seq_len, 50263);
+  cpu_dumper_.Print("present_0", ort_.GetTensorMutableData<float>(fetches[1]), 2, batch_size, num_heads);
+  cpu_dumper_.Print("present_1", ort_.GetTensorMutableData<float>(fetches[2]), 2, batch_size, num_heads);
+  cpu_dumper_.Print("present_2", ort_.GetTensorMutableData<float>(fetches[3]), 2, batch_size, num_heads);
+#endif
+
+    gsl::span<int32_t> beam_next_tokens;
+    gsl::span<int32_t> beam_indices;
+
+    const OrtValue& logits_internal = (*ortlogits);
+
+    CUSTOMOP_RETURN_IF_ERROR(GenerateNextToken(logits_internal, beam_next_tokens, beam_indices, beam_state, cpu_state, iteration_counter, ops_map));
+
+    // When all batches are finished, stop earlier to avoid wasting computation.
+    if (beam_scorer_->IsDone()) {
+      break;
     }
-    std::cout<<std::endl;
+
+    // Increase sequence length after a new token is generated.
+    ++current_length;
+
+    if (current_length < parameters_.max_length) {
+      CUSTOMOP_RETURN_IF_ERROR(UpdateFeeds(ortmemoryinfo, fetches, feeds, current_length,
+                                      position_ids,
+                                      gsl::make_span(reinterpret_cast<const int32_t*>(beam_next_tokens.data()), parameters_.BatchBeamSize()),
+                                      gsl::make_span(reinterpret_cast<const int32_t*>(beam_indices.data()), parameters_.BatchBeamSize())));
+    
+    
+    
+      fetches.clear();
+     
+      //TODO Get the new outputs ready
+      past_seq_len += seq_len; 
+      seq_len = 1;
+
+      std::vector<int64_t> logits_dims{parameters_.batch_size, parameters_.num_beams, 50263};
+      OrtValue* ortlogits;
+      api_.CreateTensorAsOrtValue(ort_allocator, logits_dims.data(), logits_dims.size(),
+                ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ortlogits);
+      fetches.emplace_back(ortlogits);
+
+#if DEBUG_BEAM_SEARCH
+      std::cout<<"Past seq len after iteration "<<iteration_counter<<":"<<past_seq_len<<std::endl;
+      std::cout<<"Size of outputs :"<<fetches.size()<<std::endl;
+#endif
+
+      //std::vector<float> present_0_data(2 * batch_size * num_heads * (seq_len+past_seq_len) * head_size, 0);
+      std::vector<int64_t> present_dims{2, batch_size, num_heads, seq_len+past_seq_len, head_size};
+      for (int i = gpt_subgraph_first_present_output_idx_; i < gpt_subgraph_first_present_output_idx_+6; i++) {
+        OrtValue* ort_present;
+        api_.CreateTensorAsOrtValue(ort_allocator, present_dims.data(), present_dims.size(),
+                              ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_present);
+        
+        fetches.emplace_back(ort_present);
+      }
+    } else {
+      fetches.clear();
+    }
+  }
+
+  gsl::span<const float> final_beam_scores(beam_state.beam_scores.data(), beam_state.beam_scores.size());
+  // TODO For cuda, these scores will be copied over from cuda
+  /*
+  if (this->IsCuda()) {
+    ORT_RETURN_IF_ERROR(this->device_copy_func_(cpu_state.final_beam_scores,
+                                              final_beam_scores,
+                                              nullptr,
+                                              DeviceCopyDirection::deviceToHost));
+    final_beam_scores = gsl::make_span<const float>(cpu_state.final_beam_scores.data(),
+                                                  cpu_state.final_beam_scores.size());
   }
   */
+
+  beam_scorer_->Finalize(
+                api_,
+                ort_,
+                &(cpu_state.sequences),
+                final_beam_scores,
+                sequences,
+                sequences_scores);
+
+  // Output per token scores
+  //TODO output scores is an optional third output that is not supported now
+  /*if (output_scores != nullptr) {
+      gsl::span<float> target = output_scores->MutableDataAsSpan<float>();
+      gsl::span<const float> source = gsl::span<const float>(beam_state.scores.data(), beam_state.scores.size());
+      assert(target.length() == source.length());
+      ORT_RETURN_IF_ERROR(this->device_copy_func_(target, source, nullptr, DeviceCopyDirection::deviceToDevice));
+    }
+  }*/
 
   return nullptr;
 }
@@ -516,9 +731,19 @@ void SetBeamSearchOutputToZero(OrtKernelContext* context, Ort::CustomOpApi &ort,
   for (int64_t i = 0; i < size2-1; i++) {
     out2[i] = 2.0f;
   }
+
+#ifdef DEBUG_BEAM_SEARCH
+  std::cout<<"SetBeamSearchOutputToZero done with success"<<std::endl;
+#endif
 }
 
-OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &api, Ort::CustomOpApi &ort, OrtSession *session, custombsop::BeamSearchParameters parameters) {
+OrtStatusPtr RunBeamSearchOnInternalSession(
+      OrtKernelContext* context,
+      OrtApi &api,
+      Ort::CustomOpApi &ort,
+      OrtSession *session,
+      custombsop::BeamSearchParameters parameters,
+      std::unordered_map<std::string, OrtOp*> &ops_map) {
   std::vector<OrtValue*> inputs;
   std::vector<const char*> input_names{"input_ids", "position_ids", "attention_mask", "past_0", "past_1", "past_2", "past_3", "past_4", "past_5"};
 
@@ -530,7 +755,8 @@ OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &a
   OrtAllocator *ortallocator;
   api.GetAllocatorWithDefaultOptions(&ortallocator);
 
-  void* thread_pool = ort.KernelContext_GetThreadPool(context);
+  //void* thread_pool = ort.KernelContext_GetThreadPool(context);
+  void* thread_pool = nullptr;
   void* cuda_stream_ = nullptr;
 
   BeamSearchImpl<float>impl{api,
@@ -542,14 +768,14 @@ OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &a
                             cuda_stream_,
                             //dumper_,
                             parameters,
-                            //std::make_unique<OrtAllocator>(*ortmemoryinfo),
+                            ortallocator,
                             BeamSearchCpuDeviceHelper::CreateInputs,
                             BeamSearchCpuDeviceHelper::AddToFeeds,
                             //topk_func_ ? topk_func_ : BeamSearchCpuDeviceHelper::TopK,
-                            //BeamsearchCpuDeviceHelper::ProcessLogits<float>,
-                            BeamSearchCpuDeviceHelper::InitBeamState<float>};
+                            BeamSearchCpuDeviceHelper::ProcessLogits<float>,
+                            BeamSearchCpuDeviceHelper::InitBeamState<float>,
                             //device_copy_func_ ? device_copy_func_ : BeamSearchCpuDeviceHelper::DeviceCopy<float>,
-                            //update_feeds_func_ ? update_feeds_func_ : BeamSearchCpuDeviceHelper::UpdateFeeds<float>};
+                            BeamSearchCpuDeviceHelper::UpdateFeeds<float>};
   OrtStatusPtr status_ptr = impl.Initialize();
   if (status_ptr != nullptr) {
     //TODO handle better than abort
@@ -560,8 +786,12 @@ OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &a
   const OrtValue* input_ids_tensor = ort.KernelContext_GetInput(context, 0);
   const int* input_ids = ort.GetTensorData<int>(input_ids_tensor);
   
-  return impl.Execute(context, input_ids_tensor, ortallocator, ortmemoryinfo);
-
+  OrtStatusPtr status = impl.Execute(input_ids_tensor, ortallocator, ortmemoryinfo, session, ops_map);
+  if (status != nullptr) {
+    std::cout<<api.GetErrorMessage(status)<<std::endl;
+  }
+  
+  /*
   OrtTensorTypeAndShapeInfo* input_ids_info = ort.GetTensorTypeAndShape(input_ids_tensor);
   std::vector<int64_t> tensor_shape = ort.GetTensorShape(input_ids_info);
   ort.ReleaseTensorTypeAndShapeInfo(input_ids_info);
@@ -605,7 +835,7 @@ OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &a
         ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &attn_mask);
   inputs.emplace_back(std::move(attn_mask));
 
-#ifdef PRINT_TO_CONSOLE
+#ifdef DEBUG_BEAM_SEARCH
   for (int i = 0; i < batch_size; i++) {
     for (int j = 0; j < seq_len; j++) {
       std::cout<<(ort.GetTensorData<int>(inputs[0]))[i*seq_len+j]<<",";
@@ -628,11 +858,11 @@ OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &a
   }
 #endif
 
-  int64_t past_seq_len = 0;
+  int64_t past_seq_len_1 = 0;
   int64_t num_heads = 16;
   int64_t head_size = 64;
 
-  std::vector<int64_t> past_dims{2, batch_size, num_heads, past_seq_len, head_size};
+  std::vector<int64_t> past_dims{2, batch_size, num_heads, past_seq_len_1, head_size};
   std::vector<float> past_data;
   
   for (int i = 0; i < 6; i++) {
@@ -653,12 +883,12 @@ OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &a
       logits_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ortlogits);
   outputs.emplace_back(std::move(ortlogits));
 
-  std::vector<float> present_0_data(2 * batch_size * num_heads * (seq_len+past_seq_len) * head_size, 0);
-  std::vector<int64_t> present_dims{2, batch_size, num_heads, seq_len+past_seq_len, head_size};
+  std::vector<float> present_0_data(2 * batch_size * num_heads * (seq_len+past_seq_len_1) * head_size, 0);
+  std::vector<int64_t> present_dims{2, batch_size, num_heads, seq_len+past_seq_len_1, head_size};
   for (int i = 0; i < 6; i++) {
     OrtValue* ort_present;
     // ort.present_1, ort.present_2, ort.present_3, ort.present_4, ort.present_5;
-    api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, present_0_data.data(), 4*2*batch_size*num_heads*(seq_len+past_seq_len)*head_size, present_dims.data(),
+    api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, present_0_data.data(), 4*2*batch_size*num_heads*(seq_len+past_seq_len_1)*head_size, present_dims.data(),
         present_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_present);
     outputs.emplace_back(ort_present);
   }
@@ -668,23 +898,30 @@ OrtStatusPtr RunBeamSearchOnInternalSession(OrtKernelContext* context, OrtApi &a
     //std::cout<<"Running it for "<<iterations<<std::endl;
     api.Run(session, nullptr, input_names.data(), inputs.data(), 9, output_names.data(), 7, outputs.data());
   }
-#ifdef PRINT_TO_CONSOLE
-  std::cout<<"Printing logits"<<std::endl;
-  float* logits = ort.GetTensorMutableData<float>(outputs[0]);
-  for (int i = 0; i < batch_size; i++) {
-    std::cout<<"batch:"<<i<<std::endl;
-    for (int j = 0; j < seq_len; j++) {
-      for (int k = 0; k < 50; k++) {
-      //for (int k = 0; k < 50263; k++) {
-        std::cout<<logits[i*seq_len + j*50263 + k]<<"\t";
-      }
-      std::cout<<std::endl;
-    }
-    std::cout<<std::endl;
-  }
+  */
+  /*
+#ifdef DEBUG_BEAM_SEARCH
+  CpuTensorConsoleDumper cpu_dumper;
+  cpu_dumper.Print("logits", ort.GetTensorMutableData<float>(outputs[0]), batch_size, seq_len, 50263);
+  cpu_dumper.Print("present_0", ort.GetTensorMutableData<float>(outputs[1]), 2, batch_size, num_heads);
+  cpu_dumper.Print("present_1", ort.GetTensorMutableData<float>(outputs[2]), 2, batch_size, num_heads);
+  cpu_dumper.Print("present_2", ort.GetTensorMutableData<float>(outputs[3]), 2, batch_size, num_heads);
 #endif
+  */
+ 
+  /*
+  OrtTensorTypeAndShapeInfo* input_ids_info = ort.GetTensorTypeAndShape(input_ids_tensor);
+  std::vector<int64_t> tensor_shape = ort.GetTensorShape(input_ids_info);
+  ort.ReleaseTensorTypeAndShapeInfo(input_ids_info);
+
+  int64_t batch_size = tensor_shape[0];
+  int64_t seq_len = tensor_shape[1];
+
   //TODO set this with the actual return sequences
   SetBeamSearchOutputToZero(context, ort, batch_size, seq_len);
+  */
+ 
+  return nullptr;
 }
 
 } //namespace custombsop
