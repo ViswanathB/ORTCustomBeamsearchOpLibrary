@@ -2,11 +2,15 @@
 // Licensed under the MIT License.
 
 #include "dump_tensor.h"
-
+#include <iostream>
+#include <type_traits>
+#include <iomanip>
 namespace custombsop {
 
+using namespace std;
+
 #ifdef DEBUG_BEAM_SEARCH
-constexpr int64_t kDefaultSnippetEdgeItems = 10;
+constexpr int64_t kDefaultSnippetEdgeItems = 3;
 
 // Skip non edge items in last dimension
 #define SKIP_NON_EDGE_ITEMS_LAST_DIM(dim_size, index, edge_items)                          \
@@ -27,6 +31,14 @@ constexpr int64_t kDefaultSnippetEdgeItems = 10;
   }
 
 template <typename T>
+void PrintValue(const T& value) {
+    if (std::is_floating_point<T>::value)
+      std::cout << std::setprecision(8) << value;
+    else
+      std::cout<<value;
+}
+
+template <typename T>
 void DumpCpuTensor(const char* name, const T* tensor, int dim0, int dim1, int64_t edge_items) {
   if (nullptr != name) {
     std::cout << std::string(name) << std::endl;
@@ -34,10 +46,11 @@ void DumpCpuTensor(const char* name, const T* tensor, int dim0, int dim1, int64_
 
   for(int i=0;i<dim0;i++) {
       SKIP_NON_EDGE_ITEMS(dim0, i, edge_items);
-      std::cout<<tensor[i*dim1];
+      PrintValue(tensor[i*dim1]);
       for (int j=1;j<dim1;j++){
           SKIP_NON_EDGE_ITEMS_LAST_DIM(dim0, i, edge_items);
-          std::cout<<","<<tensor[i*dim1+j];
+          std::cout<<",";
+          PrintValue(tensor[i*dim1+j]);
       }
       std::cout<<std::endl;
   }
@@ -54,10 +67,11 @@ void DumpCpuTensor(const char* name, const T* tensor, int64_t dim0, int64_t dim1
     SKIP_NON_EDGE_ITEMS(dim0, i, edge_items);
     for (int64_t j = 0; j < dim1; j++) {
       SKIP_NON_EDGE_ITEMS(dim1, j, edge_items);
-      std::cout<<tensor[i * dim1 * dim2 + j * dim2];
+      PrintValue(tensor[i * dim1 * dim2 + j * dim2]);
       for (int64_t k = 1; k < dim2; k++) {
         SKIP_NON_EDGE_ITEMS_LAST_DIM(dim2, k, edge_items);
-        std::cout << ", "<<tensor[i * dim1 * dim2 + j * dim2 + k];
+        std::cout << ", ";
+        PrintValue(tensor[i * dim1 * dim2 + j * dim2 + k]);
       }
       std::cout << std::endl;
     }

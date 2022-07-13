@@ -212,6 +212,11 @@ OrtStatusPtr ProcessLogits(
 
   CUSTOMOP_ENFORCE(logits_shape.size() == 3);
   auto input_length = logits_shape[1];
+  auto logits_batch_size = logits_shape[0];
+
+#ifdef DEBUG_BEAM_SEARCH
+  std::cout<<"logits shape:"<<logits_shape[0]<<","<<logits_shape[1]<<","<<logits_shape[2]<<std::endl;
+#endif
 
   // Get logits for the last token:
   //    next_token_logits = logits[:, -1, :], and the result shape is (batch_size * num_beams, vocab_size)
@@ -225,6 +230,11 @@ OrtStatusPtr ProcessLogits(
       gsl::copy(source, target);
       current_logits += input_length * vocab_size;
     }
+  } else {
+    const T* current_logits = logits_data;
+    gsl::span<const T> source(current_logits, batch_beam_size*vocab_size);
+    gsl::span<T> target = next_token_logits.subspan(0, batch_beam_size*vocab_size);
+    gsl::copy(source, target);
   }
 
 #ifdef DEBUG_BEAM_SEARCH
@@ -276,6 +286,10 @@ OrtStatusPtr ProcessLogits(
       }
     }
   }
+
+#ifdef DEBUG_BEAM_SEARCH
+  dumper->Print("batch beam_scores", beam_state->beam_scores.data(), batch_size, num_beams);
+#endif
 
 #ifdef DEBUG_BEAM_SEARCH
   dumper->Print("next_token_scores after adding beam_scores", next_token_scores.data(), batch_size, num_beams, vocab_size);

@@ -8,13 +8,16 @@
 ### TODO
 1. In lot of places, I have removed SafeInt<>, since this was a derivation from ORT. 
 However this can be replaced with the library from msl::utilities::
-2. Output scores in not supported as 3rd input now, this should be added as contrib op supports this.
+2. Output scores in not supported as 3rd output now, this should be added as contrib op supports this.
 3. GetConsoleDumper() is not used everywhere with DEBUG_BEAM_SEARCH, sometimes directly accessing cpu_dumper_ -> use the other one, since on GPU
 it will fail. 
 4. Ort_allocator is used to create OrtValue in number of places. Where is this released, how can this be released? OrtValue* is not a smart pointer by default.
 5. std::move() doesn't matter for a pointer if it is not unique_ptr -> remove these from the code base. 
 6. Some of the templates functions use DataType(T) to know what kind of memory to allocate, this happens are more than one place
 search for "TODO datatypeimpl" where all this was replaced.
+7. The entire e2e doesn't have proper error handling, there are some places where api used can throw error and some places where the computation 
+within custom OP can throw error, if customOP fails since this is a single op, may be we should throw an error back to user and let them decide what to do with it?
+8. Can InvokeOp be done everytime on the firstly created topk and softmax -> saves time to create this. Already doing this - when to release?
 
 ### TBD
 CustomOpApi is a wrapper around OrtAPI -> THIS IS good way to reduce the number of variables the user has to define.

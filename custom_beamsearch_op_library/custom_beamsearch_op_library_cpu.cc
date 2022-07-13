@@ -210,15 +210,23 @@ struct CustomBeamsearchOpKernel {
       parameters_.num_heads = 16;
       parameters_.head_size = 64;
       parameters_.num_layers = 6;
+
+      //TODO Read these from each input
+      parameters_.length_penalty = 1.0;
+      parameters_.repetition_penalty = 1.0;
+      parameters_.temperature = 1.0;
+
       OrtStatusPtr status = custombsop::RunBeamSearchOnInternalSession(context, api_, ort_, session_, parameters_, contrib_kernels_);
       if (status != nullptr) {
         ORT_CXX_API_THROW("run internal session failed:", api_.GetErrorCode(status));
       }
     }
 
+    /*
     for(auto& it: contrib_kernels_) {
       ort_.ReleaseOp(reinterpret_cast<OrtOp*>(it.second));
     }
+    */
   }
 
  private:

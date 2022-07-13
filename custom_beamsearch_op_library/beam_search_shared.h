@@ -10,7 +10,7 @@
 
 namespace custombsop {
 
-#define DEBUG_BEAM_SEARCH 1
+//#define DEBUG_BEAM_SEARCH 1
 
 template <typename T>
 struct IBeamSearchState {

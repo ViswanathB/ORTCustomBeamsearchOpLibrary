@@ -23,10 +23,8 @@ class Sequences : public ISequences {
   // Returns current sequence length.
   int GetSequenceLength() const override;
 
-#ifdef DEBUG_BEAM_SEARCH
   // Print the sequences to StdOut in debug mode
   void PrintSequences(const IConsoleDumper* dumper) const;
-#endif
 
   // Select sequences based on beam indices, then append next token to selected sequences.
   void AppendNextTokenToSequences(

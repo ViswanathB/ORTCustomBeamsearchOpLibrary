@@ -70,6 +70,10 @@ void BeamSearchParameters::ParseFromInputs(OrtKernelContext* context, Ort::Custo
   const OrtValue* repetition_penalty_tensor = ort.KernelContext_GetInput(context, 6);
   repetition_penalty = repetition_penalty_tensor ? static_cast<float>(*ort.GetTensorData<int>(repetition_penalty_tensor)) : 1.0f;
   CUSTOMOP_ENFORCE(repetition_penalty > 0.0f, "repetition_penalty shall be greater than 0, got ", repetition_penalty);
+
+  temperature = 1.0f;
+  length_penalty = 1.0f;
+  repetition_penalty = 1.0f;
 }
 
 /* TODO remove these parts, subgraph doesn't exist anymore

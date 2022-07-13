@@ -77,7 +77,7 @@ struct BeamSearchState : public custombsop::IBeamSearchState<T> {
     this->next_positions = AllocateBuffer<int32_t>(allocator, &temp_ptr, batch_beam_size);
     next_positions_buffer_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
 
-    this->beam_scores = AllocateBuffer<float>(allocator, &temp_ptr, batch_beam_size);
+    this->beam_scores = AllocateBuffer<float>(allocator, &temp_ptr, batch_beam_size, true);
     beam_scores_buffer_ = std::move(std::unique_ptr<float>(reinterpret_cast<float*>(temp_ptr)));
 
     if (output_scores) {
@@ -434,24 +434,7 @@ OrtStatusPtr BeamSearchImpl<T>::Execute(
 #ifdef DEBUG_BEAM_SEARCH
   std::cout<<"Calling create inputs:"<<std::endl;
 #endif
-/*
-  std::vector<OrtValue*> outputs;
-  OrtValue* sequences;
-  size_t sequences_data_size = parameters_.batch_size * parameters_.num_return_sequences * parameters_.max_length;
-  std::vector<int32_t> sequences_data(sequences_data_size, 0);
-  vector<int64_t> sequences_dims = {parameters_.batch_size, parameters_.num_return_sequences, parameters_.max_length};
-  api_.CreateTensorWithDataAsOrtValue(ortmemoryinfo, sequences_data.data(), size_t(4)*sequences_data_size, sequences_dims.data(),
-      sequences_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &sequences);
-  outputs.emplace_back(std::move(sequences));
 
-  OrtValue* sequences_scores;
-  size_t sequences_scores_data_size = parameters_.batch_size * parameters_.num_return_sequences;
-  std::vector<float> sequences_scores_data(sequences_scores_data_size, 0);
-  vector<int64_t> sequences_scores_dims = {parameters_.batch_size, parameters_.num_return_sequences};
-  api_.CreateTensorWithDataAsOrtValue(ortmemoryinfo, sequences_scores_data.data(), size_t(4)*sequences_scores_data_size, sequences_scores_dims.data(),
-      sequences_scores_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &sequences_scores);
-  outputs.emplace_back(std::move(sequences_scores));
-*/
   std::vector<int64_t> output1_dims;
   output1_dims.push_back(parameters_.batch_size);
   output1_dims.push_back(parameters_.num_return_sequences);
@@ -573,7 +556,7 @@ OrtStatusPtr BeamSearchImpl<T>::Execute(
   }
   
   while (current_length < parameters_.max_length) {
-    std::cout<<"Inside the beam search loop at iteration:" << iteration_counter+1<<std::endl;
+    //std::cout<<"Inside the beam search loop at iteration:" << iteration_counter+1<<std::endl;
 
     iteration_counter ++;
 
@@ -582,21 +565,28 @@ OrtStatusPtr BeamSearchImpl<T>::Execute(
     std::cout<<"CurrentLength:"<<cur_len<<std::endl;
 #endif
 
+#ifdef DEBUG_BEAM_SEARCH
+  cpu_dumper_.Print("input_ids", ort_.GetTensorMutableData<float>(feeds[0]), parameters_.batch_size * parameters_.num_beams, current_length-past_seq_len);
+  if (iteration_counter > 1) {
+    cpu_dumper_.Print("past_0", ort_.GetTensorMutableData<float>(feeds[3]), 2 * batch_size * num_heads, current_length-1, head_size);
+    cpu_dumper_.Print("past_1", ort_.GetTensorMutableData<float>(feeds[4]), 2 * batch_size * num_heads, current_length-1, head_size);
+  }
+#endif
+
     //TODO resuse the input and output buffers.
     // All of them are actually from stack, how is this working?? Is the CreateTensorWithDataAsValue moving them to heap??
     CUSTOMOP_RETURN_IF_ERROR(api_.Run(session, nullptr, input_names.data(), feeds.data(), 9, output_names.data(), 7, fetches.data()));
 
 #ifdef DEBUG_BEAM_SEARCH
   cpu_dumper_.Print("logits", ort_.GetTensorMutableData<float>(fetches[0]), batch_size, seq_len, 50263);
-  cpu_dumper_.Print("present_0", ort_.GetTensorMutableData<float>(fetches[1]), 2, batch_size, num_heads);
-  cpu_dumper_.Print("present_1", ort_.GetTensorMutableData<float>(fetches[2]), 2, batch_size, num_heads);
-  cpu_dumper_.Print("present_2", ort_.GetTensorMutableData<float>(fetches[3]), 2, batch_size, num_heads);
+  cpu_dumper_.Print("present_0", ort_.GetTensorMutableData<float>(fetches[1]), 2 * batch_size * num_heads, current_length, head_size);
+  cpu_dumper_.Print("present_1", ort_.GetTensorMutableData<float>(fetches[2]), 2 * batch_size * num_heads, current_length, head_size);
 #endif
 
     gsl::span<int32_t> beam_next_tokens;
     gsl::span<int32_t> beam_indices;
 
-    const OrtValue& logits_internal = (*ortlogits);
+    const OrtValue& logits_internal = *(fetches[0]);
 
     CUSTOMOP_RETURN_IF_ERROR(GenerateNextToken(logits_internal, beam_next_tokens, beam_indices, beam_state, cpu_state, iteration_counter, ops_map));
 
@@ -613,8 +603,6 @@ OrtStatusPtr BeamSearchImpl<T>::Execute(
                                       position_ids,
                                       gsl::make_span(reinterpret_cast<const int32_t*>(beam_next_tokens.data()), parameters_.BatchBeamSize()),
                                       gsl::make_span(reinterpret_cast<const int32_t*>(beam_indices.data()), parameters_.BatchBeamSize())));
-    
-    
     
       fetches.clear();
      
@@ -681,62 +669,6 @@ OrtStatusPtr BeamSearchImpl<T>::Execute(
   return nullptr;
 }
 
-void SetBeamSearchOutputToZero(OrtKernelContext* context, Ort::CustomOpApi &ort, int batch_size, int seq_len) {
-  //TODO Temp function to set the outputs of custom beam search OP to some value
-  // so there is no error, this would be ideally set to 
-  //std::cout<<"Setting BeamSearchOutputToZero:"<<std::endl;
-  const OrtValue* input_ids = ort.KernelContext_GetInput(context, 0);
-
-  const OrtValue* num_ret_seqs = ort.KernelContext_GetInput(context, 4);
-  const int* num_ret_seqs_data = ort.GetTensorData<int>(num_ret_seqs);
-  const int num_seqs = num_ret_seqs_data[0];
-
-  std::vector<int64_t> output1_dims;
-  output1_dims.push_back(batch_size);
-  output1_dims.push_back(num_seqs);
-  output1_dims.push_back(seq_len);
-
-  OrtValue* output1 = ort.KernelContext_GetOutput(context, 0, output1_dims.data(), output1_dims.size());
-  int* out1 = ort.GetTensorMutableData<int>(output1);
-
-  OrtTensorTypeAndShapeInfo* output_info1 = ort.GetTensorTypeAndShape(output1);
-  std::vector<int64_t> tensor_shape = ort.GetTensorShape(output_info1);
-
-#ifdef DEBUG_BEAM_SEARCH
-  std::cout<<"Tensor shape of first output of custom bs OP"<<std::endl;
-  for (int i=0;i<tensor_shape.size();i++){
-    std::cout<<tensor_shape[i]<<",";
-  }
-  std::cout<<std::endl;
-#endif
-
-  int64_t size1 = ort.GetTensorShapeElementCount(output_info1);
-  ort.ReleaseTensorTypeAndShapeInfo(output_info1);
-  for (int64_t i = 0; i < size1-1; i++) {
-    out1[i] = 10;
-  }
-
-  std::vector<int64_t> output2_dims;
-  output2_dims.push_back(batch_size);
-  output2_dims.push_back(num_seqs);
-
-  OrtValue* output2 = ort.KernelContext_GetOutput(context, 1, output2_dims.data(), output2_dims.size());
-  float* out2 = ort.GetTensorMutableData<float>(output2);
-
-  OrtTensorTypeAndShapeInfo* output_info2 = ort.GetTensorTypeAndShape(output2);
-  int64_t size2 = ort.GetTensorShapeElementCount(output_info2);
-  ort.ReleaseTensorTypeAndShapeInfo(output_info2);
-
-  // TODO these values should actually be set from logits
-  for (int64_t i = 0; i < size2-1; i++) {
-    out2[i] = 2.0f;
-  }
-
-#ifdef DEBUG_BEAM_SEARCH
-  std::cout<<"SetBeamSearchOutputToZero done with success"<<std::endl;
-#endif
-}
-
 OrtStatusPtr RunBeamSearchOnInternalSession(
       OrtKernelContext* context,
       OrtApi &api,
@@ -790,137 +722,7 @@ OrtStatusPtr RunBeamSearchOnInternalSession(
   if (status != nullptr) {
     std::cout<<api.GetErrorMessage(status)<<std::endl;
   }
-  
-  /*
-  OrtTensorTypeAndShapeInfo* input_ids_info = ort.GetTensorTypeAndShape(input_ids_tensor);
-  std::vector<int64_t> tensor_shape = ort.GetTensorShape(input_ids_info);
-  ort.ReleaseTensorTypeAndShapeInfo(input_ids_info);
 
-  int64_t batch_size = tensor_shape[0];
-  int64_t seq_len = tensor_shape[1];
-
-  // TODO, short cut to get the basic comparison with python version
-  const OrtValue* max_length_tensor = ort.KernelContext_GetInput(context, 1);
-  const int* max_length = ort.GetTensorData<int>(max_length_tensor);
-
-  int iterations = max_length[0];
-#ifdef DEBUG_BEAM_SEARCH
-  std::cout<<"Batch_size:"<<batch_size<<std::endl;
-  std::cout<<"Seq_len:"<<seq_len<<std::endl;
-#endif
-
-  std::vector<int> input_ids_data;
-  std::vector<int> position_ids_data;
-  std::vector<int> attention_mask_data;
-  for (int i = 0; i < batch_size; i++) {
-    for (int j = 0; j < seq_len; j++) {
-      input_ids_data.push_back(input_ids[i*seq_len+j]);
-      position_ids_data.push_back(j);
-      attention_mask_data.push_back(1);
-    }
-  }
-
-  OrtValue *ort_input_ids;
-  api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, input_ids_data.data(), 4 * batch_size * seq_len, tensor_shape.data(), tensor_shape.size(),
-        ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &ort_input_ids);
-  inputs.emplace_back(std::move(ort_input_ids));
-
-  OrtValue *pos_ids;
-  api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, position_ids_data.data(), 4 * batch_size * seq_len, tensor_shape.data(), tensor_shape.size(),
-        ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &pos_ids);
-  inputs.emplace_back(std::move(pos_ids));
-
-  OrtValue *attn_mask;
-  api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, attention_mask_data.data(), 4 * batch_size * seq_len, tensor_shape.data(), tensor_shape.size(),
-        ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &attn_mask);
-  inputs.emplace_back(std::move(attn_mask));
-
-#ifdef DEBUG_BEAM_SEARCH
-  for (int i = 0; i < batch_size; i++) {
-    for (int j = 0; j < seq_len; j++) {
-      std::cout<<(ort.GetTensorData<int>(inputs[0]))[i*seq_len+j]<<",";
-    }
-    std::cout<<std::endl;
-  }
-
-  for (int i = 0; i < batch_size; i++) {
-    for (int j = 0; j < seq_len; j++) {
-      std::cout<<(ort.GetTensorData<int>(inputs[1]))[i*seq_len+j]<<",";
-    }
-    std::cout<<std::endl;
-  }
-
-  for (int i = 0; i < batch_size; i++) {
-    for (int j = 0; j < seq_len; j++) {
-      std::cout<<(ort.GetTensorData<int>(inputs[2]))[i*seq_len+j]<<",";
-    }
-    std::cout<<std::endl;
-  }
-#endif
-
-  int64_t past_seq_len_1 = 0;
-  int64_t num_heads = 16;
-  int64_t head_size = 64;
-
-  std::vector<int64_t> past_dims{2, batch_size, num_heads, past_seq_len_1, head_size};
-  std::vector<float> past_data;
-  
-  for (int i = 0; i < 6; i++) {
-    OrtValue *ort_past_data;
-    api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, past_data.data(), 0, past_dims.data(), past_dims.size(),
-        ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_past_data);
-
-    inputs.emplace_back(std::move(ort_past_data));
-  }
-
-  std::vector<const char*> output_names{"logits", "present_0", "present_1", "present_2", "present_3", "present_4", "present_5"};
-  std::vector<OrtValue*> outputs;
-  std::vector<float> logits_data(batch_size * seq_len * 50263, 0);
-  std::vector<int64_t> logits_dims{batch_size, seq_len, 50263};
-  
-  OrtValue* ortlogits;
-  api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, logits_data.data(), 4*batch_size*seq_len*50263, logits_dims.data(),
-      logits_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ortlogits);
-  outputs.emplace_back(std::move(ortlogits));
-
-  std::vector<float> present_0_data(2 * batch_size * num_heads * (seq_len+past_seq_len_1) * head_size, 0);
-  std::vector<int64_t> present_dims{2, batch_size, num_heads, seq_len+past_seq_len_1, head_size};
-  for (int i = 0; i < 6; i++) {
-    OrtValue* ort_present;
-    // ort.present_1, ort.present_2, ort.present_3, ort.present_4, ort.present_5;
-    api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, present_0_data.data(), 4*2*batch_size*num_heads*(seq_len+past_seq_len_1)*head_size, present_dims.data(),
-        present_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_present);
-    outputs.emplace_back(ort_present);
-  }
-  
-  //for (int i = 0; i < iterations; i++) {
-  for (int i = 0; i < 1; i++) {
-    //std::cout<<"Running it for "<<iterations<<std::endl;
-    api.Run(session, nullptr, input_names.data(), inputs.data(), 9, output_names.data(), 7, outputs.data());
-  }
-  */
-  /*
-#ifdef DEBUG_BEAM_SEARCH
-  CpuTensorConsoleDumper cpu_dumper;
-  cpu_dumper.Print("logits", ort.GetTensorMutableData<float>(outputs[0]), batch_size, seq_len, 50263);
-  cpu_dumper.Print("present_0", ort.GetTensorMutableData<float>(outputs[1]), 2, batch_size, num_heads);
-  cpu_dumper.Print("present_1", ort.GetTensorMutableData<float>(outputs[2]), 2, batch_size, num_heads);
-  cpu_dumper.Print("present_2", ort.GetTensorMutableData<float>(outputs[3]), 2, batch_size, num_heads);
-#endif
-  */
- 
-  /*
-  OrtTensorTypeAndShapeInfo* input_ids_info = ort.GetTensorTypeAndShape(input_ids_tensor);
-  std::vector<int64_t> tensor_shape = ort.GetTensorShape(input_ids_info);
-  ort.ReleaseTensorTypeAndShapeInfo(input_ids_info);
-
-  int64_t batch_size = tensor_shape[0];
-  int64_t seq_len = tensor_shape[1];
-
-  //TODO set this with the actual return sequences
-  SetBeamSearchOutputToZero(context, ort, batch_size, seq_len);
-  */
- 
   return nullptr;
 }
 
