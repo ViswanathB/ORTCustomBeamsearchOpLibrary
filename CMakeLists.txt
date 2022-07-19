@@ -34,6 +34,7 @@ file(COPY ${CUSTOMBEAMSEARCHOPLIB_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
      "${CMAKE_CURRENT_BINARY_DIR}/utils.h"
+     "${CMAKE_CURRENT_BINARY_DIR}/utils.cc"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_shared.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.h"
      "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.cc"

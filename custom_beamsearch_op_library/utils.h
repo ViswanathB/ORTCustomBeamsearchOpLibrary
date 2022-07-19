@@ -15,6 +15,12 @@
 #include "onnxruntime_cxx_api.h"
 #undef ORT_API_MANUAL_INIT
 
+#ifdef _WIN32
+#include <Windows.h>
+#else
+#include <unistd.h>
+#endif
+
 using namespace std;
 
 //TODO Move all the functions to utils.cc and keep only declaration here.
@@ -62,7 +68,6 @@ MakeStringImpl(ss, t);
 MakeStringImpl(ss, args...);
 }
 
-
 template <typename ...Args>
 static const char* MakeString(const Args& ...args) noexcept {
   std::ostringstream ss;
@@ -97,14 +102,12 @@ class BufferDeleter {
   BufferDeleter(OrtAllocator* allocator): allocator_(allocator) {}
   BufferDeleter(): allocator_(nullptr) {}
   
-
   void operator()(void* p) {
     allocator_->Free(allocator_, p);
-    //free(p);
   }
 
   private:
-  //TODO not a shared pointer
+  //TODO is a shared pointer better?
   OrtAllocator* allocator_;
 };
 
@@ -142,3 +145,5 @@ static int64_t SizeHelper(std::vector<int64_t> &array) {
 
   return total_size;
 }
+
+uint64_t GetTimeMs64();
