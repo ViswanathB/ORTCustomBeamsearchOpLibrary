@@ -8,7 +8,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-#include "gsl/gsl"
+#include <gsl/gsl>
+#include <safeint.h>
 
 #define ORT_API_MANUAL_INIT
 #include "onnxruntime_cxx_api.h"
@@ -17,7 +18,6 @@
 using namespace std;
 
 //TODO Move all the functions to utils.cc and keep only declaration here.
-
 static void print_assertion() {
     std::cout << std::endl;
 }
@@ -76,19 +76,11 @@ gsl::span<T> AllocateBuffer(OrtAllocator *allocator,
                             size_t elements,
                             bool fill = false,
                             T fill_value = T{}) {
+
   //size_t bytes = SafeInt<size_t>(sizeof(T)) * elements;
   size_t bytes = sizeof(T) * elements;
-  //*buffer = allocator->Alloc(allocator, bytes);
-  //TODO malloc is happening on the heap, this should be same as ort_Allocator here since, it is
-  // allocating from the heap, if ort_allocator allocates the memory it needs a explicit way to
-  // destruct the items, for example, the unique pointer when created should also be passed in with
-  // the desctructor containing the ort_allocator to destruct it
-  // It should be matter since on cpu, heap memory is used for all the sessions.
-  *buffer = malloc(bytes);
 
-  //void* data = allocator->Alloc(bytes);
-  //BufferUniquePtr temp_buffer(data, BufferDeleter(allocator));
-  //buffer = std::move(temp_buffer);
+  *buffer = malloc(bytes);
 
   T* first = reinterpret_cast<T*>(*buffer);
   auto span = gsl::make_span(first, elements);
@@ -99,6 +91,47 @@ gsl::span<T> AllocateBuffer(OrtAllocator *allocator,
 
   return span;
 }
+
+class BufferDeleter {
+ public:
+  BufferDeleter(OrtAllocator* allocator): allocator_(allocator) {}
+  BufferDeleter(): allocator_(nullptr) {}
+  
+
+  void operator()(void* p) {
+    allocator_->Free(allocator_, p);
+    //free(p);
+  }
+
+  private:
+  //TODO not a shared pointer
+  OrtAllocator* allocator_;
+};
+
+//TODO Update this to use ort allocator
+using BufferUniquePtr = std::unique_ptr<void, BufferDeleter>;
+
+template <typename T>
+gsl::span<T> AllocateBufferUniquePtr(OrtAllocator *allocator,
+                                    BufferUniquePtr &buffer,
+                                    size_t elements,
+                                    bool fill = false,
+                                    T fill_value = T{}) {
+  size_t bytes = sizeof(T) * elements;
+
+  //buffer = BufferUniquePtr(malloc(bytes), BufferDeleter());
+  buffer = BufferUniquePtr(allocator->Alloc(allocator, bytes), BufferDeleter(allocator));
+
+  T* first = reinterpret_cast<T*>(buffer.get());
+  auto span = gsl::make_span(first, elements);
+
+  if (fill) {
+    std::fill_n(first, elements, fill_value);
+  }
+
+  return span;
+}
+
 
 static int64_t SizeHelper(std::vector<int64_t> &array) {
   int64_t total_size = 1;

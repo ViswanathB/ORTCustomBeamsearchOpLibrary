@@ -118,25 +118,17 @@ void BeamSearchScorer::Initialize(OrtAllocator* ort_allocator, int sequence_leng
 
   size_t batch_beam_size = batch_size_ * num_beams_;
   constexpr bool no_fill = false;  // do not fill values after allocation
-
-  void* temp_ptr;
-  done_ = AllocateBuffer<bool>(ort_allocator, &temp_ptr, batch_size_, no_fill);
-  std::fill_n(done_.data(), done_.size(), false);
-  done_ptr_ = std::move(std::unique_ptr<bool>(reinterpret_cast<bool*>(temp_ptr)));
-
-  next_beam_scores_ = AllocateBuffer<float>(ort_allocator, &temp_ptr, batch_beam_size, no_fill);
-  next_beam_scores_ptr_ = std::move(std::unique_ptr<float>(reinterpret_cast<float*>(temp_ptr)));
-  next_beam_tokens_ = AllocateBuffer<int32_t>(ort_allocator, &temp_ptr, batch_beam_size, no_fill);
-  next_beam_tokens_ptr_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
-  next_beam_indices_ = AllocateBuffer<int32_t>(ort_allocator, &temp_ptr, batch_beam_size, no_fill);
-  next_beam_indices_ptr_=  std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
+  
+  done_ = AllocateBufferUniquePtr<bool>(ort_allocator, done_ptr_, batch_size_, true);
+  next_beam_scores_ = AllocateBufferUniquePtr<float>(ort_allocator, next_beam_scores_ptr_, batch_beam_size);
+  next_beam_tokens_ = AllocateBufferUniquePtr<int32_t>(ort_allocator, next_beam_tokens_ptr_, batch_beam_size);
+  next_beam_indices_ = AllocateBufferUniquePtr<int32_t>(ort_allocator, next_beam_indices_ptr_, batch_beam_size);
 
   // Space to store intermediate sequence with length sequence_length, sequence_length + 1, ..., max_sequence_length.
   size_t buffer_per_beam = (static_cast<size_t>(max_length_) * (max_length_ + 1) - static_cast<size_t>(sequence_length - 1) * sequence_length) / 2;
   hypothesis_buffer_length_ = batch_beam_size * buffer_per_beam;
 
-  hypothesis_buffer_ = AllocateBuffer<int32_t>(ort_allocator, &temp_ptr, hypothesis_buffer_length_, no_fill);
-  hypothesis_buffer_ptr_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
+  hypothesis_buffer_ = AllocateBufferUniquePtr<int32_t>(ort_allocator, hypothesis_buffer_ptr_, hypothesis_buffer_length_);
 }
 
 void BeamSearchScorer::Process(ISequences* sequences,

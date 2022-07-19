@@ -2,14 +2,14 @@
 // Licensed under the MIT License.
 
 #pragma once
-using namespace std;
 
+#include "beam_search_parameters.h"
+#include "beam_search_shared.h"
 #define ORT_API_MANUAL_INIT
 #include "onnxruntime_cxx_api.h"
 #undef ORT_API_MANUAL_INIT
 
-#include "beam_search_parameters.h"
-#include "beam_search_shared.h"
+using namespace std;
 
 //#define PRINT_TO_CONSOLE
 namespace custombsop {

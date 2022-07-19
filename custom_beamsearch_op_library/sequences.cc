@@ -1,6 +1,7 @@
-#include "sequences.h"
 #include <safeint.h>
 #include <assert.h>
+
+#include "sequences.h"
 
 namespace custombsop {
 

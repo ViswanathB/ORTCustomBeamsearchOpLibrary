@@ -1,12 +1,15 @@
 #pragma once
+
 #include <stdint.h>
-#include "gsl/span"
 #include <algorithm>
+
+#include "gsl/span"
+#include "utils.h"
 
 #define ORT_API_MANUAL_INIT
 #include "onnxruntime_cxx_api.h"
 #undef ORT_API_MANUAL_INIT
-#include "utils.h"
+
 
 namespace custombsop {
 

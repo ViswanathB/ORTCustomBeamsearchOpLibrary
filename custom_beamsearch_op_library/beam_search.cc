@@ -21,11 +21,8 @@ struct BeamSearchCpuState : public custombsop::IBeamSearchCpuState {
   custombsop::Sequences sequences;
 
   void Init(OrtAllocator* ort_allocator, size_t batch_beam_size, int max_length, bool is_cuda) {
-    void *temp_ptr;
-    this->sequence_lengths = AllocateBuffer<int32_t>(ort_allocator, &temp_ptr, batch_beam_size);
-    sequence_lengths_buffer_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
-    this->sequences_space = AllocateBuffer<int32_t>(ort_allocator, &temp_ptr, size_t(2) * batch_beam_size * max_length);
-    sequences_space_buffer_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
+    this->sequence_lengths = AllocateBufferUniquePtr<int32_t>(ort_allocator, sequence_lengths_buffer_, batch_beam_size);
+    this->sequences_space = AllocateBufferUniquePtr<int32_t>(ort_allocator, sequences_space_buffer_, size_t(2) * batch_beam_size * max_length);
 
     // TODO This is only needed for cuda, so commenting this out
     // rather this code path is never hit.
@@ -40,12 +37,13 @@ struct BeamSearchCpuState : public custombsop::IBeamSearchCpuState {
   }
 
  private:
-  std::unique_ptr<float> final_beam_scores_buffer_;
-  std::unique_ptr<int32_t> sequence_lengths_buffer_;
+  BufferUniquePtr sequence_lengths_buffer_;
+  BufferUniquePtr sequences_space_buffer_;
+
   std::unique_ptr<float> topk_scores_buffer_;
   std::unique_ptr<int32_t> topk_tokens_buffer_;
   std::unique_ptr<int32_t> topk_indices_buffer_;
-  std::unique_ptr<int32_t> sequences_space_buffer_;
+  std::unique_ptr<float> final_beam_scores_buffer_;
 };
 
 template<typename T>
@@ -57,45 +55,32 @@ struct BeamSearchState : public custombsop::IBeamSearchState<T> {
             int sequence_length,
             int max_length,
             bool output_scores) {
+    //TODO Purpose of SafeInt, is it really helping?
     size_t batch_beam_size = SafeInt<size_t>(batch_size) * num_beams;
-
     size_t next_token_size = SafeInt<size_t>(batch_beam_size) * vocab_size;
 
-    void *temp_ptr;
-    this->next_token_logits = AllocateBuffer<T>(allocator, &temp_ptr, next_token_size);
-    next_token_logits_buffer_ = std::move(std::unique_ptr<T>(reinterpret_cast<T*>(temp_ptr)));
-
-    this->next_token_scores = AllocateBuffer<float>(allocator, &temp_ptr, next_token_size);
-    next_token_scores_buffer_ = std::move(std::unique_ptr<float>(reinterpret_cast<float*>(temp_ptr)));
-
-    this->next_tokens = AllocateBuffer<int32_t>(allocator, &temp_ptr, SafeInt<size_t>(2) * batch_beam_size);
-    next_tokens_buffer_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
-
-    this->next_indices = AllocateBuffer<int32_t>(allocator, &temp_ptr, SafeInt<size_t>(2) * batch_beam_size);
-    next_indices_buffer_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
-
-    this->next_positions = AllocateBuffer<int32_t>(allocator, &temp_ptr, batch_beam_size);
-    next_positions_buffer_ = std::move(std::unique_ptr<int32_t>(reinterpret_cast<int32_t*>(temp_ptr)));
-
-    this->beam_scores = AllocateBuffer<float>(allocator, &temp_ptr, batch_beam_size, true);
-    beam_scores_buffer_ = std::move(std::unique_ptr<float>(reinterpret_cast<float*>(temp_ptr)));
+    this->next_token_logits = AllocateBufferUniquePtr<T>(allocator, next_token_logits_buffer_, next_token_size);
+    this->next_token_scores = AllocateBufferUniquePtr<float>(allocator, next_token_scores_buffer_, next_token_size);
+    this->next_tokens = AllocateBufferUniquePtr<int32_t>(allocator, next_tokens_buffer_, SafeInt<size_t>(2) * batch_beam_size);
+    this->next_indices = AllocateBufferUniquePtr<int32_t>(allocator, next_indices_buffer_, SafeInt<size_t>(2) * batch_beam_size);
+    this->next_positions = AllocateBufferUniquePtr<int32_t>(allocator, next_positions_buffer_, batch_beam_size);
+    this->beam_scores = AllocateBufferUniquePtr<float>(allocator, beam_scores_buffer_, batch_beam_size, true);
 
     if (output_scores) {
       size_t elements = SafeInt<size_t>(max_length - sequence_length) * batch_size * num_beams * vocab_size;
-      this->scores = AllocateBuffer<float>(allocator, &temp_ptr, elements);
-      scores_buffer_ = std::move(std::unique_ptr<float>(reinterpret_cast<float*>(temp_ptr)));
+      this->scores = AllocateBufferUniquePtr<float>(allocator, scores_buffer_, elements);
       this->remaining_scores = this->scores;
     }
   }
 
  private:
-  std::unique_ptr<T> next_token_logits_buffer_;
-  std::unique_ptr<float> next_token_scores_buffer_;
-  std::unique_ptr<int32_t> next_tokens_buffer_;
-  std::unique_ptr<int32_t> next_indices_buffer_;
-  std::unique_ptr<int32_t> next_positions_buffer_;
-  std::unique_ptr<float> beam_scores_buffer_;
-  std::unique_ptr<float> scores_buffer_;
+  BufferUniquePtr next_token_logits_buffer_;
+  BufferUniquePtr next_token_scores_buffer_;
+  BufferUniquePtr next_tokens_buffer_;
+  BufferUniquePtr next_indices_buffer_;
+  BufferUniquePtr next_positions_buffer_;
+  BufferUniquePtr beam_scores_buffer_;
+  BufferUniquePtr scores_buffer_;
 };
 
 template <typename T>
@@ -462,10 +447,6 @@ OrtStatusPtr BeamSearchImpl<T>::Execute(
   BeamSearchCpuState cpu_state;
   cpu_state.Init(ort_allocator, static_cast<size_t>(parameters_.BatchBeamSize()), parameters_.max_length, IsCuda());
 
-  //TODO how is stack address working when call is made to AllocateBuffer
-  //void* sequence_lengths_buffer;
-  //gsl::span<int32_t> sequence_lengths_ = AllocateBuffer<int32_t>(ort_allocator, &sequence_lengths_buffer, parameters_.BatchBeamSize());
-
   OrtValue *expanded_inputs;
   OrtValue *expanded_position_ids;
   OrtValue *expanded_attention_mask;
@@ -599,13 +580,18 @@ OrtStatusPtr BeamSearchImpl<T>::Execute(
     ++current_length;
 
     if (current_length < parameters_.max_length) {
-      CUSTOMOP_RETURN_IF_ERROR(UpdateFeeds(ortmemoryinfo, fetches, feeds, current_length,
+      CUSTOMOP_RETURN_IF_ERROR(UpdateFeeds(ortmemoryinfo,
+                                      fetches,
+                                      feeds,
+                                      current_length,
                                       position_ids,
                                       gsl::make_span(reinterpret_cast<const int32_t*>(beam_next_tokens.data()), parameters_.BatchBeamSize()),
                                       gsl::make_span(reinterpret_cast<const int32_t*>(beam_indices.data()), parameters_.BatchBeamSize())));
-    
+
+      //Only logits are released, all others are either released or used in next iteration as inputs
+      api_.ReleaseValue(fetches[0]);
       fetches.clear();
-     
+
       //TODO Get the new outputs ready
       past_seq_len += seq_len; 
       seq_len = 1;
@@ -630,9 +616,16 @@ OrtStatusPtr BeamSearchImpl<T>::Execute(
         
         fetches.emplace_back(ort_present);
       }
-    } else {
-      fetches.clear();
     }
+  }
+
+  //Clean all feeds and fetches
+  for (int i=0; i<feeds.size(); i++) {
+    api_.ReleaseValue(feeds[i]);
+  }
+
+  for(int i=0;i<fetches.size();i++) {
+    api_.ReleaseValue(fetches[i]);
   }
 
   gsl::span<const float> final_beam_scores(beam_state.beam_scores.data(), beam_state.beam_scores.size());
@@ -682,10 +675,12 @@ OrtStatusPtr RunBeamSearchOnInternalSession(
   // Both of the following should provide the same thing, one for memory info and other for ort allocator.
   OrtMemoryInfo *ortmemoryinfo;
   // Must be freed explicitly
-  api.CreateMemoryInfo("Cpu", OrtAllocatorType::OrtDeviceAllocator, 0, OrtMemType::OrtMemTypeCPU, &ortmemoryinfo);
+  //api.CreateMemoryInfo("Cpu", OrtAllocatorType::OrtDeviceAllocator, 0, OrtMemType::OrtMemTypeCPU, &ortmemoryinfo);
+  api.CreateMemoryInfo("Cpu", OrtAllocatorType::OrtArenaAllocator, 0, OrtMemType::OrtMemTypeDefault, &ortmemoryinfo);
 
   OrtAllocator *ortallocator;
-  api.GetAllocatorWithDefaultOptions(&ortallocator);
+  //api.GetAllocatorWithDefaultOptions(&ortallocator);
+  api.CreateAllocator(session, ortmemoryinfo, &ortallocator);
 
   //void* thread_pool = ort.KernelContext_GetThreadPool(context);
   void* thread_pool = nullptr;

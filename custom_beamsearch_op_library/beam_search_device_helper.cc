@@ -1,7 +1,8 @@
 #include "beam_search_device_helper.h"
-#include "safeint.h"
-#include "gsl/span"
-#include "gsl/gsl"
+
+#include <safeint.h>
+#include <gsl/span>
+#include <gsl/gsl>
 
 using namespace std;
 using namespace msl::utilities;
@@ -46,8 +47,11 @@ void PickGptPastState(
       gsl::span<T> past_value = past_span.subspan(past_key_size + j * block_size_per_beam, block_size_per_beam);
       gsl::copy(present_key, past_key);
       gsl::copy(present_value, past_value);
+
+      api.ReleaseValue(last_outputs[gpt_subgraph_first_present_output_idx + i]);
     }
 
+    api.ReleaseValue(next_inputs[gpt_subgraph_first_past_input_idx + i]);
     next_inputs[gpt_subgraph_first_past_input_idx + i] = past;
   }
 }
@@ -86,6 +90,7 @@ OrtStatusPtr UpdateFeeds(
 
     // TODO what happens to the original input_ids
     // since there were creating on the stack they just get deallocated properly.
+    api.ReleaseValue(next_inputs[0]);
     next_inputs[0] = input_ids;
 
     int32_t* position_ids_data = ort.GetTensorMutableData<int32_t>(position_ids);
@@ -110,6 +115,7 @@ OrtStatusPtr UpdateFeeds(
       }
       new_mask_data[i * current_length + current_length - 1] = 1;
     }
+    api.ReleaseValue(next_inputs[2]);
     next_inputs[2] = new_mask;
 
 #ifdef DEBUG_BEAM_SEARCH
@@ -123,6 +129,7 @@ OrtStatusPtr UpdateFeeds(
       // feed present_* output to past_* inputs one by one
       const int k = gpt_subgraph_first_past_input_idx - gpt_subgraph_first_present_output_idx;
       for (size_t i = gpt_subgraph_first_present_output_idx; i < last_outputs.size(); ++i) {
+        api.ReleaseValue(next_inputs[i + k]);
         next_inputs[i + k] = last_outputs[i];
       }
     } else {

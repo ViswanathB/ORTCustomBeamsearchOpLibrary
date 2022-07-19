@@ -1,6 +1,8 @@
 #pragma once
-#include "beam_search_shared.h"
 #include <functional>
+
+#include "beam_search_shared.h"
+
 
 // TODO Use cxx api instead of calling c api's directly. 
 using namespace std;

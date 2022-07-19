@@ -1,4 +1,6 @@
+#pragma once
 #include <queue>
+
 #include "utils.h"
 #include "beam_search_shared.h"
 
@@ -91,19 +93,21 @@ class BeamSearchScorer : public IBeamScorer {
   int pad_token_id_;
   int eos_token_id_;
 
-  std::unique_ptr<bool> done_ptr_;      // Allocated buffer for done_
+
+  //std::unique_ptr<bool> done_ptr_;      // Allocated buffer for done_
+  BufferUniquePtr done_ptr_;
   gsl::span<bool> done_;                // List of flags indicates whether each batch is finished or not. Its shape is (batch_size).
 
-  std::unique_ptr<float> next_beam_scores_ptr_;
+  BufferUniquePtr next_beam_scores_ptr_;
   gsl::span<float> next_beam_scores_;
 
-  std::unique_ptr<int32_t> next_beam_tokens_ptr_;
+  BufferUniquePtr next_beam_tokens_ptr_;
   gsl::span<int32_t> next_beam_tokens_;
 
-  std::unique_ptr<int32_t> next_beam_indices_ptr_;
+  BufferUniquePtr next_beam_indices_ptr_;
   gsl::span<int32_t> next_beam_indices_;
 
-  std::unique_ptr<int32_t> hypothesis_buffer_ptr_;      // Allocated buffer to hold all hypotheses
+  BufferUniquePtr hypothesis_buffer_ptr_;      // Allocated buffer to hold all hypotheses
   gsl::span<int32_t> hypothesis_buffer_;                // Span of the allocated buffer
   size_t hypothesis_buffer_length_;                     // Total number of elements
   size_t hypothesis_buffer_offset_;                     // Offset of avaiable buffer, or length of used buffer.
