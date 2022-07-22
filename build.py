@@ -40,14 +40,15 @@ class BuildHelper():
         [Path(path).mkdir(parents=True, exist_ok=True) for path in paths]
 
     def download_package_from_url(self, url):
-        try:
-            print("downloading onnxruntime package from", url)
-            r = requests.get(url, allow_redirects=True)
-        except requests.exceptions.RequestException as e:
-            raise SystemExit(e)
+        print("skip downloading at this point...")
+        # try:
+        #     print("downloading onnxruntime package from", url)
+        #     r = requests.get(url, allow_redirects=True)
+        # except requests.exceptions.RequestException as e:
+        #     raise SystemExit(e)
 
-        open(self.PACKAGE_PATH, 'wb').write(r.content)
-        shutil.unpack_archive(self.PACKAGE_PATH, self.PACKAGE_DIR)
+        # open(self.PACKAGE_PATH, 'wb').write(r.content)
+        # shutil.unpack_archive(self.PACKAGE_PATH, self.PACKAGE_DIR)
 
 
 def parse_arguments():
@@ -72,7 +73,7 @@ def parse_arguments():
 
     args = parser.parse_args()
     return args
-    
+
 
 
 def main():

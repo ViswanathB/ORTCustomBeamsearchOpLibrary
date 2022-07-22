@@ -89,7 +89,7 @@ struct CustomBeamsearchOpKernel {
     if (op_softmax == nullptr) {
       ORT_CXX_API_THROW("Couldn't create softmax OP in CustomBeamsearchOpKernel Constructor", ORT_RUNTIME_EXCEPTION);
     }
-    contrib_kernels_[std::string("softmax")] = op_softmax;    
+    contrib_kernels_[std::string("softmax")] = op_softmax;
   }
 
   ~CustomBeamsearchOpKernel() {
@@ -97,7 +97,7 @@ struct CustomBeamsearchOpKernel {
      */
     for(auto& it: contrib_kernels_) {
       ort_.ReleaseOp(reinterpret_cast<OrtOp*>(it.second));
-    }  
+    }
   }
 
   OrtOp* InitLogSoftMax(const OrtKernelInfo* info) {
@@ -158,7 +158,7 @@ struct CustomBeamsearchOpKernel {
 
   void Compute(OrtKernelContext* context) {
     if (session_ == nullptr && model_path_ != nullptr) {
-#ifdef DEBUG_BEAM_SEARCH      
+#ifdef DEBUG_BEAM_SEARCH
       uint64_t s_time = GetTimeMs64();
 #endif
       // The first two arguments don't matter since we are not creating the env for the first
@@ -166,7 +166,7 @@ struct CustomBeamsearchOpKernel {
       // custom OP.
       api_.CreateEnv(OrtLoggingLevel::ORT_LOGGING_LEVEL_INFO, "", &env_);
 
-      Ort::Env 
+      Ort::Env;
       OrtSessionOptions* sessionoptions;
       api_.CreateSessionOptions(&sessionoptions);
 
@@ -227,7 +227,7 @@ struct CustomBeamsearchOp : Ort::CustomOpBase<CustomBeamsearchOp, CustomBeamsear
   const char* GetName() const { return "CustomBeamsearchOp"; };
   const char* GetExecutionProviderType() const { return "CPUExecutionProvider"; };
 
-  size_t GetInputTypeCount() const { 
+  size_t GetInputTypeCount() const {
   return 10;
   };
 
@@ -250,7 +250,7 @@ struct CustomBeamsearchOp : Ort::CustomOpBase<CustomBeamsearchOp, CustomBeamsear
     }
   };
 
-  size_t GetOutputTypeCount() const { 
+  size_t GetOutputTypeCount() const {
     return 2;
   };
 
