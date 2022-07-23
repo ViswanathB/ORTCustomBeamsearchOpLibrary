@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 # Minimum CMake required
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.18)
 
 project(customBeamsearchOPLib CXX CUDA)
 
@@ -34,24 +34,24 @@ file(COPY ${ORT_HEADER_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 file(COPY ${CUSTOMBEAMSEARCHOPLIB_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
-     "${CMAKE_CURRENT_BINARY_DIR}/utils.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/utils.cc"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_shared.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.cc"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_scorer.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_scorer.cc"
-     "${CMAKE_CURRENT_BINARY_DIR}/sequences.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/sequences.cc"
-     "${CMAKE_CURRENT_BINARY_DIR}/dump_tensor.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/dump_tensor.cc"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.cc"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/beam_search.cc"
-     "${CMAKE_CURRENT_BINARY_DIR}/logits_processor.h"
-     "${CMAKE_CURRENT_BINARY_DIR}/logits_processor.cc"
-     )
+    "${CMAKE_CURRENT_BINARY_DIR}/utils.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/utils.cc"
+    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_shared.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.cc"
+    "${CMAKE_CURRENT_BINARY_DIR}/greedy_search_parameters.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/greedy_search_parameters.cc"
+    "${CMAKE_CURRENT_BINARY_DIR}/sequences.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/sequences.cc"
+    "${CMAKE_CURRENT_BINARY_DIR}/dump_tensor.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/dump_tensor.cc"
+    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.cc"
+    "${CMAKE_CURRENT_BINARY_DIR}/greedy_search.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/greedy_search.cc"
+    "${CMAKE_CURRENT_BINARY_DIR}/logits_processor.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/logits_processor.cc"
+)
 
 include(FetchContent)
 FetchContent_Declare(GSL
@@ -60,15 +60,20 @@ FetchContent_Declare(GSL
 )
 FetchContent_MakeAvailable(GSL)
 
-add_library(custom_beamsearch_op_library_cpu SHARED
-    ${CMAKE_CURRENT_BINARY_DIR}/custom_beamsearch_op_library_cpu.cc
+# The following code supports a proper namespace of SafeInt in Linux build. However compiler complains other parts of the code.
+# set(SAFEINT_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/SafeInt)
+# add_library(safeint_interface INTERFACE)
+# target_include_directories(safeint_interface INTERFACE ${SAFEINT_INCLUDE_DIR})
+
+add_library(custom_greedysearch_op_library_cpu SHARED
+    ${CMAKE_CURRENT_BINARY_DIR}/custom_greedysearch_op_library_cpu.cc
     ${CUSTOMBEAMSEARCHOPCPUIMPL_SRC}
 )
-target_link_libraries(custom_beamsearch_op_library_cpu PRIVATE GSL)
+target_link_libraries(custom_greedysearch_op_library_cpu PRIVATE GSL)
 
-set(ONNXRUNTIME_CUSTOM_BEAMSEARCH_OP_LIB_LINK_FLAG "-DEF:${CUSTOMBEAMSEARCHOPLIB_ROOT}/custom_beamsearch_op_library.def")
+set(ONNXRUNTIME_CUSTOM_BEAMSEARCH_OP_LIB_LINK_FLAG "-DEF:${CUSTOMBEAMSEARCHOPLIB_ROOT}/custom_greedysearch_op_library.def")
 
 set_property(
-  TARGET custom_beamsearch_op_library_cpu
+  TARGET custom_greedysearch_op_library_cpu
   APPEND_STRING PROPERTY LINK_FLAGS ${ONNXRUNTIME_CUSTOM_BEAMSEARCH_OP_LIB_LINK_FLAG}
 )

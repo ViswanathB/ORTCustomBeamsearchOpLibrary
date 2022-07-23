@@ -4,18 +4,15 @@
 #pragma once
 
 #include "beam_search_shared.h"
+#include "beam_search_parameters.h"
 
 namespace custombsop {
 
-struct BeamSearchParameters : public IBeamSearchParameters {
-  OrtStatusPtr BeamSearchParameters::Validate(OrtApi &api) const;
-
-  int BatchBeamSize() const { return batch_size * num_beams; }
+struct GreedySearchParameters : public BeamSearchParameters {
+  int BatchBeamSize() const { return batch_size; }
 
   void ParseFromAttributes(Ort::CustomOpApi &ort, const OrtKernelInfo* info);
 
   void ParseFromInputs(OrtKernelContext* context, Ort::CustomOpApi &ort);
-
-  //void SetSubgraphParameters(int vocab_size, int num_heads, int head_size, int num_layers);
 };
 }  // namespace custombsop

@@ -20,7 +20,7 @@ void PickGptPastState(
                 int gpt_subgraph_first_past_input_idx,
                 int gpt_subgraph_first_present_output_idx,
                 OrtAllocator *ort_allocator) {
-  
+
   int num_present_tensors = static_cast<int>(last_outputs.size()) - gpt_subgraph_first_present_output_idx;
   for (int i = 0; i < num_present_tensors; ++i) {
     const OrtValue* present = last_outputs[gpt_subgraph_first_present_output_idx + i];
@@ -30,7 +30,7 @@ void PickGptPastState(
     int64_t past_key_size = past_shape[1] * past_shape[2] * past_shape[3] * past_shape[4];
 
     OrtValue *past;
-    //TODO datatypeimpl hard coding past state to float, getting type from T which is float and then have 
+    //TODO datatypeimpl hard coding past state to float, getting type from T which is float and then have
     // a mapping to ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT
     api.CreateTensorAsOrtValue(ort_allocator, past_shape.data(), past_shape.size(),
                   ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &past);
@@ -79,8 +79,8 @@ OrtStatusPtr UpdateFeeds(
 
     OrtValue* input_ids;
     //TODO Creating new inputs here using allocator, don't do this, reuse the buffer some way
-    
-    api.CreateTensorAsOrtValue(ort_allocator, input_dims.data(), input_dims.size(), 
+
+    api.CreateTensorAsOrtValue(ort_allocator, input_dims.data(), input_dims.size(),
         ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &input_ids);
 
     int32_t* input_ids_data = ort.GetTensorMutableData<int32_t>(input_ids);
@@ -98,16 +98,16 @@ OrtStatusPtr UpdateFeeds(
       position_ids_data[i]++;
     }
     next_inputs[1] = position_ids;
-  
+
     // Update attention mask
     OrtValue* old_mask = next_inputs[2];
     int32_t* old_mask_data = ort.GetTensorMutableData<int32_t>(old_mask);
 
     OrtValue* new_mask;
     std::vector<int64_t> mask_dims = {batch_beam_size, current_length};
-    api.CreateTensorAsOrtValue(ort_allocator, mask_dims.data(), mask_dims.size(), 
+    api.CreateTensorAsOrtValue(ort_allocator, mask_dims.data(), mask_dims.size(),
           ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &new_mask);
-    
+
     int32_t* new_mask_data = ort.GetTensorMutableData<int32_t>(new_mask);
     for (int i = 0; i < batch_beam_size; i++) {
       for (int j = 0; j < current_length - 1; j++) {
@@ -159,7 +159,7 @@ OrtValue* ExpandInputs(OrtApi &api, Ort::CustomOpApi &ort, OrtValue* input, int 
     return input;
 
   const OrtTensorTypeAndShapeInfo* input_info = ort.GetTensorTypeAndShape(input);
-  std::vector<int64_t> input_shape = ort.GetTensorShape(input_info); 
+  std::vector<int64_t> input_shape = ort.GetTensorShape(input_info);
 
   const int64_t& batch_size = input_shape[0];
   const int64_t& sequence_length = input_shape[1];
@@ -266,7 +266,7 @@ OrtStatusPtr ProcessLogits(
   api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, next_token_scores.data(), size_t(4)*batch_size*num_beams*vocab_size, softmax_input_dims.data(),
       softmax_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &softmax_output);
   OrtValue* softmax_outputs[1] = {softmax_output};
-  
+
   OrtOp* softmax = ops_map[std::string("softmax")];
   ort.InvokeOp(context, reinterpret_cast<const OrtOp*>(softmax), softmax_inputs, 1, softmax_outputs, 1);
 
@@ -335,7 +335,7 @@ OrtStatusPtr ProcessLogits(
   api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_indices_data.data(), size_t(8)*batch_size*top_k, topk_dims.data(),
       topk_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &topk_indices);
   OrtValue* topk_outputs[2] = {topk_scores, topk_indices};
-  
+
   OrtOp* topk_op = ops_map[std::string("topk")];
   ort.InvokeOp(context, reinterpret_cast<const OrtOp*>(topk_op), topk_inputs, 2, topk_outputs, 2);
 
@@ -374,6 +374,114 @@ OrtStatusPtr ProcessLogits(
       next_scores,
       next_tokens,
       next_indices);
+
+  return nullptr;
+}
+
+template <typename T>
+OrtStatusPtr GreedySearchProcessLogits(
+    OrtKernelContext* context,
+    OrtApi &api,
+    Ort::CustomOpApi &ort,
+    const OrtValue& logits,                                     // logits output of subgraph
+    custombsop::IGreedySearchState<T>* greedy_state,            // state
+    custombsop::ISequences* sequences,                          // sequences
+    OrtAllocator* allocator,                                    // default allocator
+    void* thread_pool,                                          // thread pool (for CPU only)
+    custombsop::ILogitsProcessorList* logits_processors,        // logits processors
+    const custombsop::IBeamSearchParameters* parameters,        // parameters
+    int step,                                                   // iteration counter
+    void* stream,                                               // cuda stream (for CUDA only)
+    const custombsop::IConsoleDumper* dumper,                   // tensor dumper
+    std::unordered_map<std::string, OrtOp*> &ops_map)
+{
+  int batch_size = parameters->batch_size;
+  int vocab_size = parameters->vocab_size;
+
+  const T* logits_data = ort.GetTensorData<T>(&logits);
+
+  // Logits has shape (batch_size * num_beams, input_length, vocab_size),
+  // where input_length equals to parameters_->sequence_length for first subgraph call, and 1 for the remaining calls.
+  OrtTensorTypeAndShapeInfo* logits_data_info = ort.GetTensorTypeAndShape(&logits);
+  std::vector<int64_t> logits_shape = ort.GetTensorShape(logits_data_info);
+
+  CUSTOMOP_ENFORCE(logits_shape.size() == 3);
+  auto input_length = logits_shape[1];
+  auto logits_batch_size = logits_shape[0];
+
+#ifdef DEBUG_BEAM_SEARCH
+  std::cout<<"logits shape:"<<logits_shape[0]<<","<<logits_shape[1]<<","<<logits_shape[2]<<std::endl;
+#endif
+
+  // Get logits for the last token:
+  //    next_token_logits = logits[:, -1, :], and the result shape is (batch_size * num_beams, vocab_size)
+  // When input_length == 1, use logits directly in SoftmaxCPU below so it only need for input_length > 1.
+  gsl::span<T>& next_token_scores  = greedy_state->next_token_scores ;
+  const T* current_logits = logits_data + (input_length - 1) * vocab_size;
+  for (int i = 0; i < batch_size; i++) {
+    gsl::span<const T> source(current_logits, vocab_size);
+    gsl::span<T> target = next_token_scores .subspan(SafeInt<gsl::index>(i) * vocab_size, static_cast<gsl::index>(vocab_size));
+    gsl::copy(source, target);
+    current_logits += input_length * vocab_size;
+  }
+
+#ifdef DEBUG_BEAM_SEARCH
+  std::cout<<"Executing inside ProcessLogits"<<std::endl;
+  dumper->Print("next_token_scores ", next_token_scores .data(), batch_size, num_beams, vocab_size);
+#endif
+
+  // Apply all score processors that updates scores
+  logits_processors->Process(sequences, next_token_scores, step);
+
+#ifdef DEBUG_BEAM_SEARCH
+  dumper->Print("next_token_scores after logits processor", next_token_scores.data(), batch_size, num_beams, vocab_size);
+#endif
+
+   OrtMemoryInfo *ortmemoryinfo;
+  // Must be freed explicitly
+  api.CreateMemoryInfo("Cpu", OrtAllocatorType::OrtDeviceAllocator, 0, OrtMemType::OrtMemTypeCPU, &ortmemoryinfo);
+
+  // argmax
+  const int32_t top_k = static_cast<int32_t>(1);
+  OrtValue* topk_input;
+  std::vector<int64_t> softmax_input_dims{batch_size, vocab_size};
+  api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, next_token_scores.data(), size_t(4)*batch_size*vocab_size, softmax_input_dims.data(),
+      softmax_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &topk_input);
+
+  OrtValue* topk;
+  std::vector<int64_t> topk_input_dims{1};
+  std::vector<int64_t> topk_input_data{top_k};
+  api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_input_data.data(), size_t(8)*1, topk_input_dims.data(),
+      topk_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &topk);
+  const OrtValue* topk_inputs[2] = {reinterpret_cast<const OrtValue*>(topk_input), reinterpret_cast<const OrtValue*>(topk)};
+
+  std::vector<int64_t> topk_dims{batch_size, top_k};
+  OrtValue* topk_scores;
+  std::vector<float> topk_scores_data(batch_size*top_k, -1);
+  api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_scores_data.data(), size_t(4)*batch_size*top_k, topk_dims.data(),
+      topk_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &topk_scores);
+
+  OrtValue* topk_indices;
+  std::vector<int64_t> topk_indices_data(batch_size*top_k, -1);
+  api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_indices_data.data(), size_t(8)*batch_size*top_k, topk_dims.data(),
+      topk_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &topk_indices);
+  OrtValue* topk_outputs[2] = {topk_scores, topk_indices};
+
+  OrtOp* topk_op = ops_map[std::string("topk")];
+  ort.InvokeOp(context, reinterpret_cast<const OrtOp*>(topk_op), topk_inputs, 2, topk_outputs, 2);
+
+#ifdef DEBUG_BEAM_SEARCH
+  dumper->Print("topk_scores", topk_scores_data.data(), batch_size, top_k);
+  dumper->Print("topk_indices", topk_indices_data.data(), batch_size, top_k);
+#endif
+
+  gsl::span<const int64_t> next_token_indices = gsl::make_span(topk_indices_data.data(), batch_size * top_k);
+  gsl::copy(next_token_indices, greedy_state->next_tokens_cpu);
+
+#ifdef DEBUG_BEAM_SEARCH
+  gsl::span<const int64_t> next_tokens(greedy_state->next_tokens_cpu.data(), greedy_state->next_tokens_cpu.size());
+  dumper->Print("next_tokens before scorer", next_tokens.data(), batch_size, top_k);
+#endif
 
   return nullptr;
 }
@@ -424,6 +532,37 @@ void InitBeamState(custombsop::IBeamSearchState<T>* beam_state,
   }
 }
 
+template<typename T>
+void InitGreedyState(
+    custombsop::IGreedySearchState<T>* greedy_state,
+    gsl::span<int32_t>& sequence_lengths,
+    int batch_size,
+    int sequence_length,
+    int max_length,
+    gsl::span<const int32_t> input_ids_in_cpu,
+    void* /*stream*/) {
+  memset(greedy_state->next_token_scores.data(), 0, greedy_state->next_token_scores.size_bytes());
+  memset(greedy_state->next_tokens.data(), 0, greedy_state->next_tokens.size_bytes());
+  memset(greedy_state->next_positions.data(), 0, greedy_state->next_positions.size_bytes());
+
+  gsl::copy(sequence_lengths, greedy_state->next_positions);
+
+  int* position_data_ptr = greedy_state->next_positions.data();
+  for (int i = 0; i < batch_size; i++) {
+    position_data_ptr[i] -= 1;
+  }
+
+  memset(greedy_state->sequences_space.data(), 0, greedy_state->sequences_space.size_bytes());
+
+  // Copy input_ids to sequences[0].
+  gsl::span<int32_t> sequences_0 = greedy_state->sequences_space;
+  for (int i = 0; i < batch_size; i++) {
+    for (int j = 0; j < sequence_length; j++) {
+      sequences_0[SafeInt<gsl::index>(i) * max_length + j] = static_cast<int32_t>(input_ids_in_cpu[SafeInt<gsl::index>(i) * sequence_length + j]);
+    }
+  }
+}
+
 // Explicit template instantiations of functions
 template void InitBeamState<float>(
     custombsop::IBeamSearchState<float>* beam_state,
@@ -435,7 +574,16 @@ template void InitBeamState<float>(
     int sequence_length,
     int max_length,
     void* stream);
-  
+
+template void InitGreedyState<float>(
+    custombsop::IGreedySearchState<float>* greedy_state,
+    gsl::span<int32_t>& sequence_lengths,
+    int batch_size,
+    int sequence_length,
+    int max_length,
+    gsl::span<const int32_t> input_ids_in_cpu,
+    void* stream);
+
 template OrtStatusPtr ProcessLogits<float>(
                     OrtKernelContext *context,
                     OrtApi &api,
@@ -453,6 +601,22 @@ template OrtStatusPtr ProcessLogits<float>(
                     void* stream,                                         // cuda stream (for CUDA only)
                     const custombsop::IConsoleDumper *dumper,                   // tensor dumper
                     std::unordered_map<std::string, OrtOp*> &ops_map);
+
+template OrtStatusPtr GreedySearchProcessLogits<float>(
+    OrtKernelContext* context,
+    OrtApi &api,
+    Ort::CustomOpApi &ort,
+    const OrtValue& logits,                                     // logits output of subgraph
+    custombsop::IGreedySearchState<float>* greedy_state,            // state
+    custombsop::ISequences* sequences,                          // sequences
+    OrtAllocator* allocator,                                    // default allocator
+    void* thread_pool,                                          // thread pool (for CPU only)
+    custombsop::ILogitsProcessorList* logits_processors,        // logits processors
+    const custombsop::IBeamSearchParameters* parameters,        // parameters
+    int step,                                                   // iteration counter
+    void* stream,                                               // cuda stream (for CUDA only)
+    const custombsop::IConsoleDumper* dumper,                   // tensor dumper
+    std::unordered_map<std::string, OrtOp*> &ops_map);
 
 template OrtStatusPtr UpdateFeeds<float>(
     OrtApi &api,
@@ -481,9 +645,9 @@ OrtStatusPtr CreateInputs(OrtApi &api,
                           OrtValue** expanded_input_ids,
                           OrtValue** expanded_position_ids,
                           OrtValue** expanded_attention_mask) {
-  
+
   const OrtTensorTypeAndShapeInfo* original_input_ids_info = ort.GetTensorTypeAndShape(original_input_ids);
-  std::vector<int64_t> original_input_ids_shape = ort.GetTensorShape(original_input_ids_info); 
+  std::vector<int64_t> original_input_ids_shape = ort.GetTensorShape(original_input_ids_info);
 
   CUSTOMOP_ENFORCE(original_input_ids_shape.size() == 2)
 

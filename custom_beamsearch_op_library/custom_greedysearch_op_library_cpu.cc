@@ -6,16 +6,16 @@
 #include <iostream>
 #include <unordered_map>
 
-#include "beam_search.h"
+#include "greedy_search.h"
 #ifdef _WIN32
 #include <Windows.h>
 #else
 #include <unistd.h>
 #endif
 
-#include "beam_search_parameters.h"
+#include "greedy_search_parameters.h"
 
-static const char* c_OpDomain = "test.beamsearchop";
+static const char* c_OpDomain = "test.GreedySearchop";
 
 struct OrtCustomOpDomainDeleter {
   explicit OrtCustomOpDomainDeleter(const OrtApi* ort_api) {
@@ -46,8 +46,8 @@ struct OrtTensorDimensions : std::vector<int64_t> {
   }
 };
 
-struct CustomBeamsearchOpKernel {
-  CustomBeamsearchOpKernel(OrtApi api, const OrtKernelInfo* info)
+struct CustomGreedySearchOpKernel {
+  CustomGreedySearchOpKernel(OrtApi api, const OrtKernelInfo* info)
       : api_(api), ort_(api_) {
     // TODO move all the stuff to C++ API
     // InitAPI() can't be called - just set the global api_ that initapi() is setting to api passed in here
@@ -66,7 +66,7 @@ struct CustomBeamsearchOpKernel {
       status = api_.KernelInfoGetAttribute_string(info, "model_path", c_model_path, &model_path_len_);
       if (status != nullptr)
       {
-        ORT_CXX_API_THROW("Couldn't find model_path attribute in CustomBeamsearchOpKernel Constructor", ORT_FAIL);
+        ORT_CXX_API_THROW("Couldn't find model_path attribute in CustomGreedySearchOpKernel Constructor", ORT_FAIL);
       }
 
       model_path_ = new wchar_t[model_path_len_];
@@ -85,42 +85,19 @@ struct CustomBeamsearchOpKernel {
     }
     contrib_kernels_[std::string("topk")] = op_topk;
 
-    OrtOp* op_softmax = InitLogSoftMax(info);
-    if (op_softmax == nullptr) {
-      ORT_CXX_API_THROW("Couldn't create softmax OP in CustomBeamsearchOpKernel Constructor", ORT_RUNTIME_EXCEPTION);
-    }
-    contrib_kernels_[std::string("softmax")] = op_softmax;
+    // OrtOp* op_softmax = InitLogSoftMax(info);
+    // if (op_softmax == nullptr) {
+    //   ORT_CXX_API_THROW("Couldn't create softmax OP in CustomBeamsearchOpKernel Constructor", ORT_RUNTIME_EXCEPTION);
+    // }
+    // contrib_kernels_[std::string("softmax")] = op_softmax;
   }
 
-  ~CustomBeamsearchOpKernel() {
+  ~CustomGreedySearchOpKernel() {
     /*Release the kernels created for internal operations
      */
     for(auto& it: contrib_kernels_) {
       ort_.ReleaseOp(reinterpret_cast<OrtOp*>(it.second));
     }
-  }
-
-  OrtOp* InitLogSoftMax(const OrtKernelInfo* info) {
-    const char* type_constraint_names[1] = {"T"};
-    int type_constraint_values[1] = {1};
-
-    int64_t axis_value = 1;
-    OrtOpAttr* axis = ort_.CreateOpAttr("axis", &axis_value, 1, OrtOpAttrType::ORT_OP_ATTR_INT);
-
-    if (!axis) {
-      ORT_CXX_API_THROW("Failed to create attributes for InitLogSoftMax", ORT_RUNTIME_EXCEPTION);
-    }
-
-    OrtOpAttr* top_attrs[1] = {axis};
-    OrtOp* op_lsm_ = ort_.CreateOp(info, "LogSoftmax", "", 13,
-                  (const char**)type_constraint_names,
-                  (const ONNXTensorElementDataType*)type_constraint_values,
-                  1, top_attrs, 1, 1, 1);
-
-    ort_.ReleaseOpAttr(axis);
-
-    return op_lsm_;
-
   }
 
   OrtOp* InitTopK(const OrtKernelInfo* info) {
@@ -193,7 +170,7 @@ struct CustomBeamsearchOpKernel {
       parameters_.repetition_penalty = 1.0;
       parameters_.temperature = 1.0;
 
-      OrtStatusPtr status = custombsop::RunBeamSearchOnInternalSession(context, api_, ort_, session_, parameters_, contrib_kernels_);
+      OrtStatusPtr status = custombsop::RunGreedySearchOnInternalSession(context, api_, ort_, session_, parameters_, contrib_kernels_);
       if (status != nullptr) {
         ORT_CXX_API_THROW("run internal session failed:", api_.GetErrorCode(status));
       }
@@ -213,37 +190,33 @@ struct CustomBeamsearchOpKernel {
   size_t model_path_len_;
 
   //Parameters
-  custombsop::BeamSearchParameters parameters_;
+  custombsop::GreedySearchParameters parameters_;
 
   //Contrib Kernels
   std::unordered_map<std::string, OrtOp*> contrib_kernels_;
 };
 
-struct CustomBeamsearchOp : Ort::CustomOpBase<CustomBeamsearchOp, CustomBeamsearchOpKernel> {
+struct CustomGreedySearchOp : Ort::CustomOpBase<CustomGreedySearchOp, CustomGreedySearchOpKernel> {
   void* CreateKernel(OrtApi api, const OrtKernelInfo* info) const {
-    return new CustomBeamsearchOpKernel(api, info);
+    return new CustomGreedySearchOpKernel(api, info);
   };
 
-  const char* GetName() const { return "CustomBeamsearchOp"; };
+  const char* GetName() const { return "CustomGreedySearchOp"; };
   const char* GetExecutionProviderType() const { return "CPUExecutionProvider"; };
 
   size_t GetInputTypeCount() const {
-  return 10;
+  return 4;
   };
 
   ONNXTensorElementDataType GetInputType(size_t /*index*/index) const {
     switch (index) {
       case 0:
-      case 1:
-      case 2:
-      case 3:
-      case 4:
-      case 8:
-      case 9:
         return ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32;
-      case 5:
-      case 6:
-      case 7:
+      case 1:
+        return ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32;
+      case 2:
+        return ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32;
+      case 3:
         return ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
       default:
         return ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
@@ -251,21 +224,19 @@ struct CustomBeamsearchOp : Ort::CustomOpBase<CustomBeamsearchOp, CustomBeamsear
   };
 
   size_t GetOutputTypeCount() const {
-    return 2;
+    return 1;
   };
 
   ONNXTensorElementDataType GetOutputType(size_t /*index*/index) const {
     switch(index) {
       case 0:
         return ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32;
-      case 1:
-        return ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
       default:
          return ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
     }
   };
 
-} c_CustomBeamsearchOp;
+} c_CustomGreedySearchOp;
 
 OrtStatus* ORT_API_CALL RegisterCustomOps(OrtSessionOptions* options, const OrtApiBase* api) {
   OrtCustomOpDomain* domain = nullptr;
@@ -277,7 +248,7 @@ OrtStatus* ORT_API_CALL RegisterCustomOps(OrtSessionOptions* options, const OrtA
 
   AddOrtCustomOpDomainToContainer(domain, ortApi);
 
-  if (auto status = ortApi->CustomOpDomain_Add(domain, &c_CustomBeamsearchOp)) {
+  if (auto status = ortApi->CustomOpDomain_Add(domain, &c_CustomGreedySearchOp)) {
     return status;
   }
 

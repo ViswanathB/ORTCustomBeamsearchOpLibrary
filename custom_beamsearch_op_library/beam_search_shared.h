@@ -126,4 +126,16 @@ class IConsoleDumper {
   bool is_enabled_;
 };
 
+template <typename T>
+struct IGreedySearchState {
+  gsl::span<int64_t> next_tokens_cpu;   // shape (batch_size)
+  gsl::span<int32_t> sequences_space;   // shape (2, batch_size, max_length)
+  gsl::span<int32_t> sequence_lengths;  // shape (batch_size)
+  gsl::span<int32_t> next_positions;    // shape (batch_size, num_beams). Next position value for position_ids.
+  gsl::span<bool> eos_meet;             // shape (batch_size)
+
+  gsl::span<T> next_token_scores;       // shape (batch_size, vocab_size)
+  gsl::span<int32_t> next_tokens;       // shape (batch_size)
+};
+
 }  // namespace custombsop
