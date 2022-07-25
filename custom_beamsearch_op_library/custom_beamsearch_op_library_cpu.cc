@@ -166,7 +166,6 @@ struct CustomBeamsearchOpKernel {
       // custom OP.
       api_.CreateEnv(OrtLoggingLevel::ORT_LOGGING_LEVEL_INFO, "", &env_);
 
-      Ort::Env 
       OrtSessionOptions* sessionoptions;
       api_.CreateSessionOptions(&sessionoptions);
 

@@ -52,10 +52,19 @@ file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
      "${CMAKE_CURRENT_BINARY_DIR}/logits_processor.cc"
      )
 
+include(FetchContent)
+FetchContent_Declare(GSL
+    GIT_REPOSITORY "https://github.com/microsoft/GSL"
+    GIT_TAG "v3.1.0"
+)
+FetchContent_MakeAvailable(GSL)
+
 add_library(custom_beamsearch_op_library_cpu SHARED
     ${CMAKE_CURRENT_BINARY_DIR}/custom_beamsearch_op_library_cpu.cc
     ${CUSTOMBEAMSEARCHOPCPUIMPL_SRC}
 )
+target_link_libraries(custom_beamsearch_op_library_cpu PRIVATE GSL)
+
 
 set(ONNXRUNTIME_CUSTOM_BEAMSEARCH_OP_LIB_LINK_FLAG "-DEF:${CUSTOMBEAMSEARCHOPLIB_ROOT}/custom_beamsearch_op_library.def")
 
