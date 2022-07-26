@@ -11,13 +11,13 @@
 
 using namespace std;
 
-//#define PRINT_TO_CONSOLE
-namespace custombsop {
+namespace custombsop
+{
     OrtStatusPtr RunBeamSearchOnInternalSession(
-                            OrtKernelContext* context,
-                            OrtApi &api,
-                            Ort::CustomOpApi &ort,
-                            OrtSession *session,
-                            custombsop::BeamSearchParameters parameters,
-                            std::unordered_map<std::string, OrtOp*> &ops_map);
+        OrtKernelContext *context,
+        OrtApi &api,
+        Ort::CustomOpApi &ort,
+        OrtSession *session,
+        custombsop::BeamSearchParameters parameters,
+        std::unordered_map<std::string, OrtOp *> &ops_map);
 }

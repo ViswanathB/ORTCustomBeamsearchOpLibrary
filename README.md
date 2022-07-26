@@ -1,9 +1,24 @@
 # ORTCustomBeamsearchOpLibrary
 
+##Prerequisites
+Minimum requirements:
+1. Windows SDK version 10.0.19041.0+
+2. cmake, install cmake from https://cmake.org/install/
+
+###Note:
+It contains a library file json.hpp from https://github.com/nlohmann/json/releases/tag/v3.10.5 for json processing and will be updated as needed.
+
+
+## About the OP
+Currently only supports decoder models
+config.json has the config requirement to run the model. Only input ids and prefix vocab mask are needed as inputs. 
+
+
 ### Requirements:
 1. A model for internal beam search session.
 2. Successful conversion of the model to custom beam search OP using steps in [Convert Script](#convert-script). 
 3. 
+
 
 ### TODO
 1. In lot of places, I have removed SafeInt<>, since this was a derivation from ORT. 
@@ -17,6 +32,7 @@ search for "TODO datatypeimpl" where all this was replaced.
 7. The entire e2e doesn't have proper error handling, there are some places where api used can throw error and some places where the computation 
 within custom OP can throw error, if customOP fails since this is a single op, may be we should throw an error back to user and let them decide what to do with it?
 8. Can InvokeOp be done everytime on the firstly created topk and softmax -> saves time to create this. Already doing this - when to release?
+
 
 ### TBD
 CustomOpApi is a wrapper around OrtAPI -> THIS IS good way to reduce the number of variables the user has to define.

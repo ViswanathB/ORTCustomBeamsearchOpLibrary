@@ -5,17 +5,17 @@
 
 #include "beam_search_shared.h"
 
-namespace custombsop {
+namespace custombsop
+{
 
-struct BeamSearchParameters : public IBeamSearchParameters {
-  OrtStatusPtr BeamSearchParameters::Validate(OrtApi &api) const;
+  struct BeamSearchParameters : public IBeamSearchParameters
+  {
+    void BeamSearchParameters::Validate(OrtApi &api) const;
 
-  int BatchBeamSize() const { return batch_size * num_beams; }
+    int BatchBeamSize() const { return batch_size * num_beams; }
 
-  void ParseFromAttributes(Ort::CustomOpApi &ort, const OrtKernelInfo* info);
+    void ParseFromAttributes(Ort::CustomOpApi &ort, const OrtKernelInfo *info);
 
-  void ParseFromInputs(OrtKernelContext* context, Ort::CustomOpApi &ort);
-
-  //void SetSubgraphParameters(int vocab_size, int num_heads, int head_size, int num_layers);
-};
-}  // namespace custombsop
+    void ParseFromInputs(OrtKernelContext *context, Ort::CustomOpApi &ort);
+  };
+} // namespace custombsop
