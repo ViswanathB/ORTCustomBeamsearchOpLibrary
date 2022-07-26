@@ -37,6 +37,8 @@ file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
     "${CMAKE_CURRENT_BINARY_DIR}/utils.h"
     "${CMAKE_CURRENT_BINARY_DIR}/utils.cc"
     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_shared.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_scorer.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_scorer.cc"
     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.h"
     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.cc"
     "${CMAKE_CURRENT_BINARY_DIR}/greedy_search_parameters.h"
@@ -49,6 +51,8 @@ file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
     "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.cc"
     "${CMAKE_CURRENT_BINARY_DIR}/greedy_search.h"
     "${CMAKE_CURRENT_BINARY_DIR}/greedy_search.cc"
+    "${CMAKE_CURRENT_BINARY_DIR}/beam_search.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/beam_search.cc"
     "${CMAKE_CURRENT_BINARY_DIR}/logits_processor.h"
     "${CMAKE_CURRENT_BINARY_DIR}/logits_processor.cc"
 )
@@ -69,11 +73,21 @@ add_library(custom_greedysearch_op_library_cpu SHARED
     ${CMAKE_CURRENT_BINARY_DIR}/custom_greedysearch_op_library_cpu.cc
     ${CUSTOMBEAMSEARCHOPCPUIMPL_SRC}
 )
+add_library(custom_beamsearch_op_library_cpu SHARED
+    ${CMAKE_CURRENT_BINARY_DIR}/custom_beamsearch_op_library_cpu.cc
+    ${CUSTOMBEAMSEARCHOPCPUIMPL_SRC}
+)
 target_link_libraries(custom_greedysearch_op_library_cpu PRIVATE GSL)
+target_link_libraries(custom_beamsearch_op_library_cpu PRIVATE GSL)
 
-set(ONNXRUNTIME_CUSTOM_BEAMSEARCH_OP_LIB_LINK_FLAG "-DEF:${CUSTOMBEAMSEARCHOPLIB_ROOT}/custom_greedysearch_op_library.def")
+set(ONNXRUNTIME_CUSTOM_GREEDYSEARCH_OP_LIB_LINK_FLAG "-DEF:${CUSTOMBEAMSEARCHOPLIB_ROOT}/custom_greedysearch_op_library.def")
+set(ONNXRUNTIME_CUSTOM_BEAMSEARCH_OP_LIB_LINK_FLAG "-DEF:${CUSTOMBEAMSEARCHOPLIB_ROOT}/custom_beamsearch_op_library.def")
 
 set_property(
   TARGET custom_greedysearch_op_library_cpu
+  APPEND_STRING PROPERTY LINK_FLAGS ${ONNXRUNTIME_CUSTOM_GREEDYSEARCH_OP_LIB_LINK_FLAG}
+)
+set_property(
+  TARGET custom_beamsearch_op_library_cpu
   APPEND_STRING PROPERTY LINK_FLAGS ${ONNXRUNTIME_CUSTOM_BEAMSEARCH_OP_LIB_LINK_FLAG}
 )
