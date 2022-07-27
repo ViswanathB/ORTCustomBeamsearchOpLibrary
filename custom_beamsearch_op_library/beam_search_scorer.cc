@@ -235,7 +235,7 @@ namespace custombsop
   }
 
   void BeamSearchScorer::Finalize(
-      OrtApi &api,
+      const OrtApi *api,
       Ort::CustomOpApi &ort,
       ISequences *sequences,
       gsl::span<const float> &final_beam_scores,

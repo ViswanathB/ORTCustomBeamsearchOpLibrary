@@ -104,8 +104,6 @@ namespace custombsop
       std::unordered_set<int32_t> blocked_word_ids;
       for (int j = 0; j <= static_cast<int>(sequence.size()) - ngram_size_; j++)
       {
-        // Here we use naive algorithm for matching. The complexity is O(batch_beam_size * ngram_size * sequence_length)
-        // TODO: build N-Gram index (hash table with prefix of length NGram - 1 as key, and list of last word of NGram as value) for fast matching.
         if (ngram_size_ == 1 || prefix == sequence.subspan(j, prefix_length))
         {
           blocked_word_ids.insert(sequence[static_cast<gsl::index>(j) + prefix_length]);

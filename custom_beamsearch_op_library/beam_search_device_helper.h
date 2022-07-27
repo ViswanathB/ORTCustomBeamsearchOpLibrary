@@ -8,7 +8,7 @@ namespace BeamSearchDeviceHelper
 {
     // Create subgraph inputs: input_ids, position_ids and attention_mask
     using CreateInputsFunc = std::function<OrtStatusPtr(
-        OrtApi &api,
+        const OrtApi *api,
         Ort::CustomOpApi &ort,
         const OrtValue *original_input_ids,
         int num_beams,
@@ -22,7 +22,7 @@ namespace BeamSearchDeviceHelper
     template <typename T>
     using ProcessLogitsFunc = std::function<OrtStatusPtr(
         OrtKernelContext *context,
-        OrtApi &api,
+        const OrtApi *api,
         Ort::CustomOpApi &ort,
         const OrtValue &logits,                              // logits output of subgraph
         custombsop::IBeamSearchState<T> *beam_state,         // state
@@ -38,12 +38,11 @@ namespace BeamSearchDeviceHelper
 
     template <typename T>
     using UpdateFeedsFunc = std::function<OrtStatusPtr(
-        OrtApi &api,
+        const OrtApi *api,
         Ort::CustomOpApi &ort,
         OrtMemoryInfo *ortmemoryinfo,
         OrtAllocator *ort_allocator,
         void *stream,
-        // TODO make this const since we don't want to change last_outputs inside this function
         std::vector<OrtValue *> &last_outputs,
         std::vector<OrtValue *> &next_inputs,
         int current_length,
@@ -77,7 +76,7 @@ namespace BeamSearchDeviceHelper
 namespace BeamSearchCpuDeviceHelper
 {
     OrtStatusPtr CreateInputs(
-        OrtApi &api,
+        const OrtApi *api,
         Ort::CustomOpApi &ort,
         const OrtValue *original_input_ids,
         int num_beams,
@@ -91,7 +90,7 @@ namespace BeamSearchCpuDeviceHelper
     template <typename T>
     OrtStatusPtr ProcessLogits(
         OrtKernelContext *context,
-        OrtApi &api,
+        const OrtApi *api,
         Ort::CustomOpApi &ort,
         const OrtValue &logits,                              // logits output of subgraph
         custombsop::IBeamSearchState<T> *beam_state,         // state
@@ -113,7 +112,7 @@ namespace BeamSearchCpuDeviceHelper
 
     template <typename T>
     OrtStatusPtr UpdateFeeds(
-        OrtApi &api,
+        const OrtApi *api,
         Ort::CustomOpApi &ort,
         OrtMemoryInfo *ortmemoryinfo,
         OrtAllocator *ort_allocator,

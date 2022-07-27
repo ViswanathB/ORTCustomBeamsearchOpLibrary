@@ -54,12 +54,12 @@ namespace custombsop
       this->beam_scores = AllocateBufferUniquePtr<float>(allocator, beam_scores_buffer_, batch_beam_size, true);
 
       // TODO output scores is not implemented at the moment
-      if (output_scores)
-      {
-        size_t elements = SafeInt<size_t>(max_length - sequence_length) * batch_size * num_beams * vocab_size;
-        this->scores = AllocateBufferUniquePtr<float>(allocator, scores_buffer_, elements);
-        this->remaining_scores = this->scores;
-      }
+      // if (output_scores)
+      // {
+      //   size_t elements = SafeInt<size_t>(max_length - sequence_length) * batch_size * num_beams * vocab_size;
+      //   this->scores = AllocateBufferUniquePtr<float>(allocator, scores_buffer_, elements);
+      //   this->remaining_scores = this->scores;
+      // }
     }
 
   private:
@@ -76,7 +76,7 @@ namespace custombsop
   class BeamSearchImpl
   {
   public:
-    BeamSearchImpl(OrtApi &api,
+    BeamSearchImpl(const OrtApi *api,
                    Ort::CustomOpApi &ort,
                    OrtKernelContext *context,
                    custombsop::BeamSearchParameters &params,
@@ -98,7 +98,7 @@ namespace custombsop
           update_feeds_func_(update_feeds_func)
     {
       parameters_.ParseFromInputs(context, ort_);
-      parameters_.Validate(api_);
+      parameters_.Validate();
     }
 
     // Initialize by validating all the inputs, and allocating the output tensors.
@@ -147,7 +147,7 @@ namespace custombsop
 
     const custombsop::IConsoleDumper *GetConsoleDumper() const { return &(cpu_dumper_); }
 
-    OrtApi api_;
+    const OrtApi *api_;
 
     Ort::CustomOpApi ort_;
 
@@ -235,26 +235,26 @@ namespace custombsop
     std::vector<int64_t> input_ids_shape = ort_.GetTensorShape(input_ids_info);
     if (input_ids_shape.size() != 2)
     {
-      return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
-                               MakeString("Input 'input_ids' is expected to have 2 dimensions, got ", input_ids_shape.size()));
+      return api_->CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
+                                MakeString("Input 'input_ids' is expected to have 2 dimensions, got ", input_ids_shape.size()));
     }
 
-    const OrtValue *vocab_mask = ort_.KernelContext_GetInput(context, 8);
+    const OrtValue *vocab_mask = ort_.KernelContext_GetInput(context, 2);
     if (vocab_mask != nullptr)
     { // vocab_mask is optional
       OrtTensorTypeAndShapeInfo *vocab_mask_info = ort_.GetTensorTypeAndShape(vocab_mask);
       std::vector<int64_t> vocab_mask_shape = ort_.GetTensorShape(vocab_mask_info);
       if (vocab_mask_shape.size() != 1)
       {
-        return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
-                                 MakeString("Input 'vocab_mask' is expected to have 1 dimension, got ", vocab_mask_shape.size()));
+        return api_->CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
+                                  MakeString("Input 'vocab_mask' is expected to have 1 dimension, got ", vocab_mask_shape.size()));
       }
 
       // There is dependency on vocab_size parameter, which shall be set before calling this function.
       if (static_cast<int>(vocab_mask_shape[0]) != parameters_.vocab_size)
       {
-        return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
-                                 MakeString("Input 'vocab_mask' shape does not match with vocab_size, got ", vocab_mask_shape[0]));
+        return api_->CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
+                                  MakeString("Input 'vocab_mask' shape does not match with vocab_size, got ", vocab_mask_shape[0]));
       }
 
       // store vocab mask in parameters.
@@ -262,7 +262,7 @@ namespace custombsop
       parameters_.vocab_mask = gsl::make_span(vm_tensor, parameters_.vocab_size);
     }
 
-    const OrtValue *prefix_vocab_mask = ort_.KernelContext_GetInput(context, 9);
+    const OrtValue *prefix_vocab_mask = ort_.KernelContext_GetInput(context, 3);
     if (prefix_vocab_mask != nullptr)
     {
       // prefix_vocab_mask is optional
@@ -270,21 +270,21 @@ namespace custombsop
       std::vector<int64_t> p_vocab_mask_shape = ort_.GetTensorShape(p_vocab_mask_info);
       if (p_vocab_mask_shape.size() != 2)
       {
-        return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
-                                 MakeString("Input 'prefix_vocab_mask' is expected to have 2 dimensions, got ", p_vocab_mask_shape.size()));
+        return api_->CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
+                                  MakeString("Input 'prefix_vocab_mask' is expected to have 2 dimensions, got ", p_vocab_mask_shape.size()));
       }
 
       // prefix_vocab_mask first dimension should be same as the first dimension of input_ids
       if (static_cast<int>(p_vocab_mask_shape[0]) != static_cast<int>(input_ids_shape[0]))
       {
-        return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "input_ids and prefix_vocab_mask must have the same batch_size");
+        return api_->CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "input_ids and prefix_vocab_mask must have the same batch_size");
       }
 
       // There is dependency on vocab_size parameter, which shall be set before calling this function.
       if (static_cast<int>(p_vocab_mask_shape[1]) != parameters_.vocab_size)
       {
-        return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
-                                 MakeString("Input 'prefix_vocab_mask' shape does not match with vocab_size, got ", p_vocab_mask_shape[1]));
+        return api_->CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT,
+                                  MakeString("Input 'prefix_vocab_mask' shape does not match with vocab_size, got ", p_vocab_mask_shape[1]));
       }
 
       // store prefix vocab mask in parameters.
@@ -297,49 +297,39 @@ namespace custombsop
   template <typename T>
   OrtStatusPtr BeamSearchImpl<T>::Initialize()
   {
-#define CHECK_SCALAR_INPUT(name, index, required)                                                                            \
-  auto *name##_tensor = ort_.KernelContext_GetInput(context_, index);                                                        \
-  if (name##_tensor)                                                                                                         \
-  {                                                                                                                          \
-    const OrtTensorTypeAndShapeInfo *tensor_info = ort_.GetTensorTypeAndShape(name##_tensor);                                \
-    std::vector<int64_t> shape = ort_.GetTensorShape(tensor_info);                                                           \
-    if (!(shape.size() == 0 || (shape.size() == 1 && shape[0] == 1)))                                                        \
-    {                                                                                                                        \
-      return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "'BeamSearch' input " #name " doesn't have valid shape"); \
-    }                                                                                                                        \
-  }                                                                                                                          \
-  else if (required)                                                                                                         \
-  {                                                                                                                          \
-    return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "'BeamSearch' input " #name " is required");                \
+#define CHECK_SCALAR_INPUT(name, index, required)                                                                             \
+  auto *name##_tensor = ort_.KernelContext_GetInput(context_, index);                                                         \
+  if (name##_tensor)                                                                                                          \
+  {                                                                                                                           \
+    const OrtTensorTypeAndShapeInfo *tensor_info = ort_.GetTensorTypeAndShape(name##_tensor);                                 \
+    std::vector<int64_t> shape = ort_.GetTensorShape(tensor_info);                                                            \
+    if (!(shape.size() == 0 || (shape.size() == 1 && shape[0] == 1)))                                                         \
+    {                                                                                                                         \
+      return api_->CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "'BeamSearch' input " #name " doesn't have valid shape"); \
+    }                                                                                                                         \
+  }                                                                                                                           \
+  else if (required)                                                                                                          \
+  {                                                                                                                           \
+    return api_->CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "'BeamSearch' input " #name " is required");                \
   }
 
     CHECK_SCALAR_INPUT(max_length, 1, false);
 
-    CHECK_SCALAR_INPUT(min_length, 2, true);
-
-    CHECK_SCALAR_INPUT(num_beams, 3, true);
-
-    CHECK_SCALAR_INPUT(num_return_sequences, 4, true);
-
-    CHECK_SCALAR_INPUT(temperature, 5, true);
-
-    CHECK_SCALAR_INPUT(length_penalty, 6, true);
-
     if (parameters_.num_return_sequences > parameters_.num_beams)
     {
-      return api_.CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "'num_return_sequences' has to be smaller or equal to 'num_beams'.");
+      return api_->CreateStatus(OrtErrorCode::ORT_INVALID_ARGUMENT, "'num_return_sequences' has to be smaller or equal to 'num_beams'.");
     }
 
     CUSTOMOP_RETURN_IF_ERROR(CheckInputs(context_));
 
-    // This flag will be updated later when the scores output exists.
+    // TODO, currently always false.
+    // Add this to config_file to read from, this flag will be updated later when the scores output exists.
     parameters_.output_scores = false;
 
     logits_processors_.Init(parameters_);
 
-    // TODO this has to be extracted somewhere, mostly config file or when internal session is created.
-    gpt_subgraph_first_past_input_idx_ = 3;
-    gpt_subgraph_first_present_output_idx_ = 1;
+    gpt_subgraph_first_past_input_idx_ = parameters_.first_past_input_idx;
+    gpt_subgraph_first_present_output_idx_ = parameters_.first_present_output_idx;
 
     return nullptr;
   }
@@ -406,7 +396,7 @@ namespace custombsop
                                               &expanded_inputs, &expanded_position_ids, &expanded_attention_mask);
     if (status != nullptr)
     {
-      std::cout << "Error while expanding inputs:" << api_.GetErrorMessage(status) << std::endl;
+      std::cout << "Error while expanding inputs:" << api_->GetErrorMessage(status) << std::endl;
       return status;
     }
 
@@ -447,8 +437,8 @@ namespace custombsop
 
     OrtValue *position_ids;
     std::vector<int64_t> position_ids_dims{parameters_.BatchBeamSize(), 1};
-    api_.CreateTensorWithDataAsOrtValue(ortmemoryinfo, beam_state.next_positions.data(), size_t(4) * parameters_.BatchBeamSize(), position_ids_dims.data(),
-                                        position_ids_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &position_ids);
+    api_->CreateTensorWithDataAsOrtValue(ortmemoryinfo, beam_state.next_positions.data(), size_t(4) * parameters_.BatchBeamSize(), position_ids_dims.data(),
+                                         position_ids_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &position_ids);
 
     int current_length = parameters_.sequence_length;
     int iteration_counter = 0;
@@ -459,7 +449,6 @@ namespace custombsop
     int head_size = parameters_.head_size;
     int vocab_size = parameters_.vocab_size;
 
-    // TODO variable number of past states and present states based on number of layers.
     std::vector<const char *>
         input_names{"input_ids", "position_ids", "attention_mask", "past_0", "past_1", "past_2", "past_3", "past_4", "past_5"};
 
@@ -469,8 +458,8 @@ namespace custombsop
     for (int i = 0; i < parameters_.num_layers; i++)
     {
       OrtValue *ort_past_data;
-      api_.CreateTensorWithDataAsOrtValue(ortmemoryinfo, past_data.data(), 0, past_dims.data(), past_dims.size(),
-                                          ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_past_data);
+      api_->CreateTensorWithDataAsOrtValue(ortmemoryinfo, past_data.data(), 0, past_dims.data(), past_dims.size(),
+                                           ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_past_data);
 
       feeds.push_back(std::move(ort_past_data));
     }
@@ -478,16 +467,16 @@ namespace custombsop
     std::vector<const char *> output_names{"logits", "present_0", "present_1", "present_2", "present_3", "present_4", "present_5"};
     std::vector<int64_t> logits_dims{batch_size, seq_len, vocab_size};
     OrtValue *ortlogits;
-    api_.CreateTensorAsOrtValue(ort_allocator, logits_dims.data(), logits_dims.size(),
-                                ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ortlogits);
+    api_->CreateTensorAsOrtValue(ort_allocator, logits_dims.data(), logits_dims.size(),
+                                 ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ortlogits);
     fetches.push_back(ortlogits);
 
     std::vector<int64_t> present_dims{2, batch_size, num_heads, seq_len, head_size};
     for (int i = 0; i < parameters_.num_layers; i++)
     {
       OrtValue *ort_present;
-      api_.CreateTensorAsOrtValue(ort_allocator, present_dims.data(), present_dims.size(),
-                                  ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_present);
+      api_->CreateTensorAsOrtValue(ort_allocator, present_dims.data(), present_dims.size(),
+                                   ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_present);
       fetches.push_back(ort_present);
     }
 
@@ -509,7 +498,7 @@ namespace custombsop
       }
 #endif
 
-      CUSTOMOP_RETURN_IF_ERROR(api_.Run(session, nullptr, input_names.data(), feeds.data(), 9, output_names.data(), 7, fetches.data()));
+      CUSTOMOP_RETURN_IF_ERROR(api_->Run(session, nullptr, input_names.data(), feeds.data(), 9, output_names.data(), 7, fetches.data()));
 
 #ifdef DEBUG_BEAM_SEARCH
       cpu_dumper_.Print("logits", ort_.GetTensorMutableData<float>(fetches[0]), batch_size, seq_len, 50263);
@@ -542,7 +531,7 @@ namespace custombsop
                                              gsl::make_span(reinterpret_cast<const int32_t *>(beam_indices.data()), parameters_.BatchBeamSize())));
 
         // Only logits are always released, all others are either released or used in next iteration as inputs
-        api_.ReleaseValue(fetches[0]);
+        api_->ReleaseValue(fetches[0]);
         fetches.clear();
 
         past_seq_len += seq_len;
@@ -550,8 +539,8 @@ namespace custombsop
 
         std::vector<int64_t> logits_dims{parameters_.batch_size, parameters_.num_beams, 50263};
         OrtValue *ortlogits;
-        api_.CreateTensorAsOrtValue(ort_allocator, logits_dims.data(), logits_dims.size(),
-                                    ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ortlogits);
+        api_->CreateTensorAsOrtValue(ort_allocator, logits_dims.data(), logits_dims.size(),
+                                     ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ortlogits);
         fetches.push_back(ortlogits);
 
 #if DEBUG_BEAM_SEARCH
@@ -562,8 +551,8 @@ namespace custombsop
         for (int i = gpt_subgraph_first_present_output_idx_; i < gpt_subgraph_first_present_output_idx_ + 6; i++)
         {
           OrtValue *ort_present;
-          api_.CreateTensorAsOrtValue(ort_allocator, present_dims.data(), present_dims.size(),
-                                      ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_present);
+          api_->CreateTensorAsOrtValue(ort_allocator, present_dims.data(), present_dims.size(),
+                                       ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &ort_present);
 
           fetches.push_back(ort_present);
         }
@@ -573,12 +562,12 @@ namespace custombsop
     // Clean all feeds and fetches
     for (int i = 0; i < feeds.size(); i++)
     {
-      api_.ReleaseValue(feeds[i]);
+      api_->ReleaseValue(feeds[i]);
     }
 
     for (int i = 0; i < fetches.size(); i++)
     {
-      api_.ReleaseValue(fetches[i]);
+      api_->ReleaseValue(fetches[i]);
     }
 
     gsl::span<const float> final_beam_scores(beam_state.beam_scores.data(), beam_state.beam_scores.size());
@@ -591,20 +580,20 @@ namespace custombsop
         sequences,
         sequences_scores);
 
-    // TODO output scores is an optional third output that is not supported now
-    /*if (output_scores != nullptr) {
-      gsl::span<float> target = output_scores->MutableDataAsSpan<float>();
-      gsl::span<const float> source = gsl::span<const float>(beam_state.scores.data(), beam_state.scores.size());
-      assert(target.length() == source.length());
-      ORT_RETURN_IF_ERROR(this->device_copy_func_(target, source, nullptr, DeviceCopyDirection::deviceToDevice));
-    }*/
+    // // TODO output scores is an optional third output that is not supported now
+    // if (output_scores != nullptr) {
+    //   gsl::span<float> target = output_scores->MutableDataAsSpan<float>();
+    //   gsl::span<const float> source = gsl::span<const float>(beam_state.scores.data(), beam_state.scores.size());
+    //   assert(target.length() == source.length());
+    //   ORT_RETURN_IF_ERROR(this->device_copy_func_(target, source, nullptr, DeviceCopyDirection::deviceToDevice));
+    // }
 
     return nullptr;
   }
 
   OrtStatusPtr RunBeamSearchOnInternalSession(
       OrtKernelContext *context,
-      OrtApi &api,
+      const OrtApi *api,
       Ort::CustomOpApi &ort,
       OrtSession *session,
       custombsop::BeamSearchParameters parameters,
@@ -614,10 +603,10 @@ namespace custombsop
     std::vector<const char *> input_names{"input_ids", "position_ids", "attention_mask", "past_0", "past_1", "past_2", "past_3", "past_4", "past_5"};
 
     OrtMemoryInfo *ortmemoryinfo;
-    api.CreateMemoryInfo("Cpu", OrtAllocatorType::OrtArenaAllocator, 0, OrtMemType::OrtMemTypeDefault, &ortmemoryinfo);
+    api->CreateMemoryInfo("Cpu", OrtAllocatorType::OrtArenaAllocator, 0, OrtMemType::OrtMemTypeDefault, &ortmemoryinfo);
 
     OrtAllocator *ortallocator;
-    api.CreateAllocator(session, ortmemoryinfo, &ortallocator);
+    api->CreateAllocator(session, ortmemoryinfo, &ortallocator);
 
     BeamSearchImpl<float> impl{api,
                                ort,

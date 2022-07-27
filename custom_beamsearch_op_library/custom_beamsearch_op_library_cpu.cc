@@ -58,15 +58,15 @@ struct OrtTensorDimensions : std::vector<int64_t>
 
 struct CustomBeamsearchOpKernel
 {
-  CustomBeamsearchOpKernel(OrtApi api, const OrtKernelInfo *info)
-      : api_(api), ort_(api_)
+  CustomBeamsearchOpKernel(const OrtApi *api, const OrtKernelInfo *info)
+      : api_(api), ort_(*api)
   {
 
-    OrtStatus *status = api_.KernelInfoGetAttribute_string(info, "model_path", nullptr, &model_path_len_);
+    OrtStatus *status = (*api_).KernelInfoGetAttribute_string(info, "model_path", nullptr, &model_path_len_);
     if (status == nullptr && model_path_len_ > 0)
     {
       model_path_ = new char[model_path_len_];
-      status = api_.KernelInfoGetAttribute_string(info, "model_path", model_path_, &model_path_len_);
+      status = (*api_).KernelInfoGetAttribute_string(info, "model_path", model_path_, &model_path_len_);
       if (status != nullptr)
       {
         ORT_CXX_API_THROW("Couldn't find model_path attribute in CustomBeamsearchOpKernel Constructor", ORT_FAIL);
@@ -180,11 +180,12 @@ struct CustomBeamsearchOpKernel
     parameters_.num_layers = json_data["num_layers"];
     parameters_.length_penalty = json_data["length_penalty"];
     parameters_.repetition_penalty = json_data["repetetion_penalty"];
-    parameters_.temperature = json_data["temperature"];
     parameters_.num_beams = json_data["num_beams"];
     parameters_.min_length = json_data["min_length"];
     parameters_.max_words = json_data["max_words"];
     parameters_.num_return_sequences = json_data["num_return_sequences"];
+    parameters_.first_past_input_idx = json_data["first_past_input_idx"];
+    parameters_.first_present_output_idx = json_data["first_present_output_idx"];
   }
 
   void Compute(OrtKernelContext *context)
@@ -197,16 +198,16 @@ struct CustomBeamsearchOpKernel
       // The first two arguments don't matter since we are not creating the env for the first
       // time. We would only access the existing env created for parent session with is triggering this
       // custom OP.
-      api_.CreateEnv(OrtLoggingLevel::ORT_LOGGING_LEVEL_INFO, "", &env_);
+      api_->CreateEnv(OrtLoggingLevel::ORT_LOGGING_LEVEL_INFO, "", &env_);
 
       OrtSessionOptions *sessionoptions;
-      api_.CreateSessionOptions(&sessionoptions);
+      api_->CreateSessionOptions(&sessionoptions);
 
       wchar_t *w_model_path = new wchar_t[model_path_len_];
       size_t afterconversionlen;
       mbstowcs_s(&afterconversionlen, w_model_path, model_path_len_, (const char *)model_path_, model_path_len_ - 1);
 
-      OrtStatusPtr status = api_.CreateSession(env_, w_model_path, sessionoptions, &session_);
+      OrtStatusPtr status = api_->CreateSession(env_, w_model_path, sessionoptions, &session_);
 
       if (status != nullptr)
       {
@@ -226,13 +227,13 @@ struct CustomBeamsearchOpKernel
       OrtStatusPtr status = custombsop::RunBeamSearchOnInternalSession(context, api_, ort_, session_, parameters_, contrib_kernels_);
       if (status != nullptr)
       {
-        ORT_CXX_API_THROW("run internal session failed:", api_.GetErrorCode(status));
+        ORT_CXX_API_THROW("run internal session failed:", api_->GetErrorCode(status));
       }
     }
   }
 
 private:
-  OrtApi api_;
+  const OrtApi *api_;
   // keep a copy of the struct, whose ref is used in the ort_
   Ort::CustomOpApi ort_;
 
@@ -252,9 +253,9 @@ private:
 
 struct CustomBeamsearchOp : Ort::CustomOpBase<CustomBeamsearchOp, CustomBeamsearchOpKernel>
 {
-  void *CreateKernel(OrtApi api, const OrtKernelInfo *info) const
+  void *CreateKernel(const OrtApi &api, const OrtKernelInfo *info) const
   {
-    return new CustomBeamsearchOpKernel(api, info);
+    return new CustomBeamsearchOpKernel((&api), info);
   };
 
   const char *GetName() const { return "CustomBeamsearchOp"; };
@@ -262,7 +263,7 @@ struct CustomBeamsearchOp : Ort::CustomOpBase<CustomBeamsearchOp, CustomBeamsear
 
   size_t GetInputTypeCount() const
   {
-    return 10;
+    return 4;
   };
 
   ONNXTensorElementDataType GetInputType(size_t /*index*/ index) const
@@ -273,14 +274,7 @@ struct CustomBeamsearchOp : Ort::CustomOpBase<CustomBeamsearchOp, CustomBeamsear
     case 1:
     case 2:
     case 3:
-    case 4:
-    case 8:
-    case 9:
       return ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32;
-    case 5:
-    case 6:
-    case 7:
-      return ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
     default:
       return ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
     }

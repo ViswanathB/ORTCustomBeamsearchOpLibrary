@@ -44,3 +44,5 @@ env4ortcustombeamsearchoplib/*
 */CMakeFiles/*
 CMakeCache.txt
 .vscode
+
+temptest/*

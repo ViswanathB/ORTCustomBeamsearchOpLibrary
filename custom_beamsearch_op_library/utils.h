@@ -81,7 +81,6 @@ public:
   }
 
 private:
-  // TODO is a shared pointer better?
   OrtAllocator *allocator_;
 };
 using BufferUniquePtr = std::unique_ptr<void, BufferDeleter>;

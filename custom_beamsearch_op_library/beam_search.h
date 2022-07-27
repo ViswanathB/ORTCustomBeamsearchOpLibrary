@@ -15,7 +15,7 @@ namespace custombsop
 {
     OrtStatusPtr RunBeamSearchOnInternalSession(
         OrtKernelContext *context,
-        OrtApi &api,
+        const OrtApi *api,
         Ort::CustomOpApi &ort,
         OrtSession *session,
         custombsop::BeamSearchParameters parameters,

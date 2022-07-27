@@ -10,7 +10,7 @@ namespace custombsop
 
   struct BeamSearchParameters : public IBeamSearchParameters
   {
-    void BeamSearchParameters::Validate(OrtApi &api) const;
+    void BeamSearchParameters::Validate() const;
 
     int BatchBeamSize() const { return batch_size * num_beams; }
 

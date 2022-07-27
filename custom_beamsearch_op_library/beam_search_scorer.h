@@ -74,7 +74,7 @@ namespace custombsop
                  gsl::span<const int32_t> &next_tokens,
                  gsl::span<const int32_t> &next_indices) override;
 
-    void Finalize(OrtApi &api,
+    void Finalize(const OrtApi *api,
                   Ort::CustomOpApi &ort,
                   ISequences *sequences,
                   gsl::span<const float> &final_beam_scores,

@@ -12,7 +12,7 @@ namespace custombsop
   constexpr int kMaxSequenceLength = 4096;
   constexpr int kMaxNumBeams = 128;
 
-  void BeamSearchParameters::Validate(OrtApi &api) const
+  void BeamSearchParameters::Validate() const
   {
     CUSTOMOP_ENFORCE(eos_token_id > 0, "invalid eos_token_id")
     CUSTOMOP_ENFORCE(pad_token_id > 0, "invalid pad_token_id")
@@ -39,6 +39,9 @@ namespace custombsop
     batch_size = static_cast<int>(tensor_shape[0]);
     sequence_length = static_cast<int>(tensor_shape[1]);
 
-    max_length = sequence_length + max_words;
+    const OrtValue *max_length_tensor = ort.KernelContext_GetInput(context, 1);
+    max_length = max_length_tensor ? static_cast<int>(*ort.GetTensorData<int>(max_length_tensor)) : 1;
+    CUSTOMOP_ENFORCE(max_length > sequence_length, "max_length (", max_length, ") shall be greater than input sequence length (", sequence_length, ")");
+    CUSTOMOP_ENFORCE(max_length <= kMaxSequenceLength, "max_length (", max_length, ") shall be no more than ", kMaxSequenceLength);
   }
 } // namespace custombsop

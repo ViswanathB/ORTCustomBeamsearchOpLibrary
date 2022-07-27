@@ -67,7 +67,7 @@ namespace custombsop
                          gsl::span<const int32_t> &next_tokens,
                          gsl::span<const int32_t> &next_indices) = 0;
 
-    virtual void Finalize(OrtApi &api,
+    virtual void Finalize(const OrtApi *api,
                           Ort::CustomOpApi &ort,
                           ISequences *sequences,
                           gsl::span<const float> &final_beam_scores,
@@ -90,7 +90,6 @@ namespace custombsop
     int max_words;
     int num_beams;
     int num_return_sequences;
-    float temperature;
     float length_penalty;
     float repetition_penalty;
     int batch_size;      // deduce from first dimension of input_ids
@@ -102,11 +101,14 @@ namespace custombsop
     // Parameters from outputs.
     bool output_scores; // whether scores existed in output
 
-    // Parameters from subgraph.
+    // Parameters about internal graph.
     int vocab_size;
     int num_heads;
     int head_size;
     int num_layers;
+
+    int first_past_input_idx;
+    int first_present_output_idx;
   };
 
   class IConsoleDumper

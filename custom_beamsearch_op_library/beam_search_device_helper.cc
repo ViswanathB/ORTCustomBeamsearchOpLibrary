@@ -13,7 +13,7 @@ namespace BeamSearchCpuDeviceHelper
   // Copy present state to past state for GPT model
   template <typename T>
   void PickGptPastState(
-      OrtApi &api,
+      const OrtApi *api,
       Ort::CustomOpApi &ort,
       std::vector<OrtValue *> &last_outputs,
       std::vector<OrtValue *> &next_inputs,
@@ -33,10 +33,8 @@ namespace BeamSearchCpuDeviceHelper
       int64_t past_key_size = past_shape[1] * past_shape[2] * past_shape[3] * past_shape[4];
 
       OrtValue *past;
-      // TODO datatypeimpl hard coding past state to float, getting type from T which is float and then have
-      //  a mapping to ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT
-      api.CreateTensorAsOrtValue(ort_allocator, past_shape.data(), past_shape.size(),
-                                 ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &past);
+      api->CreateTensorAsOrtValue(ort_allocator, past_shape.data(), past_shape.size(),
+                                  ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &past);
 
       gsl::span<T> past_span = gsl::make_span<T>(ort.GetTensorMutableData<T>(past), SizeHelper(past_shape));
       gsl::span<const T> present_span = gsl::make_span<const T>(ort.GetTensorData<T>(present), SizeHelper(past_shape));
@@ -52,17 +50,17 @@ namespace BeamSearchCpuDeviceHelper
         gsl::copy(present_key, past_key);
         gsl::copy(present_value, past_value);
 
-        api.ReleaseValue(last_outputs[gpt_subgraph_first_present_output_idx + i]);
+        api->ReleaseValue(last_outputs[gpt_subgraph_first_present_output_idx + i]);
       }
 
-      api.ReleaseValue(next_inputs[gpt_subgraph_first_past_input_idx + i]);
+      api->ReleaseValue(next_inputs[gpt_subgraph_first_past_input_idx + i]);
       next_inputs[gpt_subgraph_first_past_input_idx + i] = past;
     }
   }
 
   template <typename T>
   OrtStatusPtr UpdateFeeds(
-      OrtApi &api,
+      const OrtApi *api,
       Ort::CustomOpApi &ort,
       OrtMemoryInfo *ortmemoryinfo,
       OrtAllocator *ort_allocator,
@@ -83,10 +81,8 @@ namespace BeamSearchCpuDeviceHelper
     std::vector<int64_t> input_dims = {batch_beam_size, 1};
 
     OrtValue *input_ids;
-    // TODO Creating new inputs here using allocator, don't do this, reuse the buffer some way
-
-    api.CreateTensorAsOrtValue(ort_allocator, input_dims.data(), input_dims.size(),
-                               ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &input_ids);
+    api->CreateTensorAsOrtValue(ort_allocator, input_dims.data(), input_dims.size(),
+                                ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &input_ids);
 
     int32_t *input_ids_data = ort.GetTensorMutableData<int32_t>(input_ids);
     for (int i = 0; i < batch_beam_size; i++)
@@ -94,9 +90,7 @@ namespace BeamSearchCpuDeviceHelper
       input_ids_data[i] = beam_next_tokens[i];
     }
 
-    // TODO what happens to the original input_ids
-    // since there were creating on the stack they just get deallocated properly.
-    api.ReleaseValue(next_inputs[0]);
+    api->ReleaseValue(next_inputs[0]);
     next_inputs[0] = input_ids;
 
     int32_t *position_ids_data = ort.GetTensorMutableData<int32_t>(position_ids);
@@ -112,8 +106,8 @@ namespace BeamSearchCpuDeviceHelper
 
     OrtValue *new_mask;
     std::vector<int64_t> mask_dims = {batch_beam_size, current_length};
-    api.CreateTensorAsOrtValue(ort_allocator, mask_dims.data(), mask_dims.size(),
-                               ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &new_mask);
+    api->CreateTensorAsOrtValue(ort_allocator, mask_dims.data(), mask_dims.size(),
+                                ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &new_mask);
 
     int32_t *new_mask_data = ort.GetTensorMutableData<int32_t>(new_mask);
     for (int i = 0; i < batch_beam_size; i++)
@@ -124,7 +118,7 @@ namespace BeamSearchCpuDeviceHelper
       }
       new_mask_data[i * current_length + current_length - 1] = 1;
     }
-    api.ReleaseValue(next_inputs[2]);
+    api->ReleaseValue(next_inputs[2]);
     next_inputs[2] = new_mask;
 
 #ifdef DEBUG_BEAM_SEARCH
@@ -140,7 +134,7 @@ namespace BeamSearchCpuDeviceHelper
       const int k = gpt_subgraph_first_past_input_idx - gpt_subgraph_first_present_output_idx;
       for (size_t i = gpt_subgraph_first_present_output_idx; i < last_outputs.size(); ++i)
       {
-        api.ReleaseValue(next_inputs[i + k]);
+        api->ReleaseValue(next_inputs[i + k]);
         next_inputs[i + k] = last_outputs[i];
       }
     }
@@ -165,7 +159,7 @@ namespace BeamSearchCpuDeviceHelper
     return nullptr;
   }
 
-  OrtValue *ExpandInputs(OrtApi &api, Ort::CustomOpApi &ort, OrtValue *input, int num_beams, OrtAllocator *allocator, ONNXTensorElementDataType element_type)
+  OrtValue *ExpandInputs(const OrtApi *api, Ort::CustomOpApi &ort, OrtValue *input, int num_beams, OrtAllocator *allocator, ONNXTensorElementDataType element_type)
   {
     // Input shape (batch_size, sequence_length)
     // Output shape (batch_size * num_beams, sequence_length)
@@ -184,7 +178,7 @@ namespace BeamSearchCpuDeviceHelper
                      "input_ids, position_ids and attention_mask is required to be int32 data type");
 
     OrtValue *expanded;
-    api.CreateTensorAsOrtValue(allocator, dims.data(), dims.size(), element_type, &expanded);
+    api->CreateTensorAsOrtValue(allocator, dims.data(), dims.size(), element_type, &expanded);
 
     const int32_t *input_data = ort.GetTensorData<int32_t>(input);
     int32_t *expanded_data = ort.GetTensorMutableData<int32_t>(expanded);
@@ -204,7 +198,7 @@ namespace BeamSearchCpuDeviceHelper
   template <typename T>
   OrtStatusPtr ProcessLogits(
       OrtKernelContext *context,
-      OrtApi &api,
+      const OrtApi *api,
       Ort::CustomOpApi &ort,
       const OrtValue &logits,                              // logits output of subgraph
       custombsop::IBeamSearchState<T> *beam_state,         // state
@@ -272,17 +266,17 @@ namespace BeamSearchCpuDeviceHelper
 
     OrtMemoryInfo *ortmemoryinfo;
     // Must be freed explicitly
-    api.CreateMemoryInfo("Cpu", OrtAllocatorType::OrtDeviceAllocator, 0, OrtMemType::OrtMemTypeCPU, &ortmemoryinfo);
+    api->CreateMemoryInfo("Cpu", OrtAllocatorType::OrtDeviceAllocator, 0, OrtMemType::OrtMemTypeCPU, &ortmemoryinfo);
 
     OrtValue *softmax_input;
     std::vector<int64_t> softmax_input_dims{batch_size, num_beams * vocab_size};
-    api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, next_token_logits.data(), size_t(4) * batch_size * num_beams * vocab_size, softmax_input_dims.data(),
-                                       softmax_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &softmax_input);
+    api->CreateTensorWithDataAsOrtValue(ortmemoryinfo, next_token_logits.data(), size_t(4) * batch_size * num_beams * vocab_size, softmax_input_dims.data(),
+                                        softmax_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &softmax_input);
     const OrtValue *softmax_inputs[1] = {reinterpret_cast<const OrtValue *>(softmax_input)};
 
     OrtValue *softmax_output;
-    api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, next_token_scores.data(), size_t(4) * batch_size * num_beams * vocab_size, softmax_input_dims.data(),
-                                       softmax_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &softmax_output);
+    api->CreateTensorWithDataAsOrtValue(ortmemoryinfo, next_token_scores.data(), size_t(4) * batch_size * num_beams * vocab_size, softmax_input_dims.data(),
+                                        softmax_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &softmax_output);
     OrtValue *softmax_outputs[1] = {softmax_output};
 
     OrtOp *softmax = ops_map[std::string("softmax")];
@@ -299,9 +293,6 @@ namespace BeamSearchCpuDeviceHelper
     dumper->Print("next_token_scores after logits processor", next_token_scores.data(), batch_size, num_beams, vocab_size);
 #endif
 
-    // Add beam score to next token scores. Corresponding python code is like:
-    //    next_token_scores = next_token_scores + beam_scores[:, None].expand_as(next_token_scores)
-    // TODO: use thread pool to parrellel
     int offset = 0;
     int batch_beam_index = 0;
     for (int i = 0; i < batch_size; i++)
@@ -323,39 +314,39 @@ namespace BeamSearchCpuDeviceHelper
     dumper->Print("next_token_scores after adding beam_scores", next_token_scores.data(), batch_size, num_beams, vocab_size);
 #endif
 
-    if (output_scores)
-    {
-      // Append next token scores to the scores output.
-      gsl::copy(next_token_scores, beam_state->remaining_scores);
-      beam_state->remaining_scores = beam_state->remaining_scores.subspan(next_token_scores.size());
-    }
+    // TODO output_scores is not used now
+    // if (output_scores)
+    // {
+    //   // Append next token scores to the scores output.
+    //   gsl::copy(next_token_scores, beam_state->remaining_scores);
+    //   beam_state->remaining_scores = beam_state->remaining_scores.subspan(next_token_scores.size());
+    // }
 
     // Apply top-k selection like the following:
     //   next_token_scores = next_token_scores.view(batch_size, num_beams * vocab_size)
     //   next_token_scores, next_tokens = torch.topk(next_token_scores, 2 * num_beams, dim=1, largest=True, sorted=True)
-
     const int32_t top_k = static_cast<int32_t>(2 * num_beams);
     OrtValue *topk_input;
-    api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, next_token_scores.data(), size_t(4) * batch_size * num_beams * vocab_size, softmax_input_dims.data(),
-                                       softmax_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &topk_input);
+    api->CreateTensorWithDataAsOrtValue(ortmemoryinfo, next_token_scores.data(), size_t(4) * batch_size * num_beams * vocab_size, softmax_input_dims.data(),
+                                        softmax_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &topk_input);
 
     OrtValue *topk;
     std::vector<int64_t> topk_input_dims{1};
     std::vector<int64_t> topk_input_data{top_k};
-    api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_input_data.data(), size_t(8) * 1, topk_input_dims.data(),
-                                       topk_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &topk);
+    api->CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_input_data.data(), size_t(8) * 1, topk_input_dims.data(),
+                                        topk_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &topk);
     const OrtValue *topk_inputs[2] = {reinterpret_cast<const OrtValue *>(topk_input), reinterpret_cast<const OrtValue *>(topk)};
 
     std::vector<int64_t> topk_dims{batch_size, top_k};
     OrtValue *topk_scores;
     std::vector<float> topk_scores_data(batch_size * top_k, -1);
-    api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_scores_data.data(), size_t(4) * batch_size * top_k, topk_dims.data(),
-                                       topk_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &topk_scores);
+    api->CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_scores_data.data(), size_t(4) * batch_size * top_k, topk_dims.data(),
+                                        topk_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &topk_scores);
 
     OrtValue *topk_indices;
     std::vector<int64_t> topk_indices_data(batch_size * top_k, -1);
-    api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_indices_data.data(), size_t(8) * batch_size * top_k, topk_dims.data(),
-                                       topk_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &topk_indices);
+    api->CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_indices_data.data(), size_t(8) * batch_size * top_k, topk_dims.data(),
+                                        topk_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &topk_indices);
     OrtValue *topk_outputs[2] = {topk_scores, topk_indices};
 
     OrtOp *topk_op = ops_map[std::string("topk")];
@@ -465,7 +456,7 @@ namespace BeamSearchCpuDeviceHelper
 
   template OrtStatusPtr ProcessLogits<float>(
       OrtKernelContext *context,
-      OrtApi &api,
+      const OrtApi *api,
       Ort::CustomOpApi &ort,
       const OrtValue &logits,                              // logits output of subgraph
       custombsop::IBeamSearchState<float> *beam_state,     // state
@@ -480,7 +471,7 @@ namespace BeamSearchCpuDeviceHelper
       std::unordered_map<std::string, OrtOp *> &ops_map);
 
   template OrtStatusPtr UpdateFeeds<float>(
-      OrtApi &api,
+      const OrtApi *api,
       Ort::CustomOpApi &ort,
       OrtMemoryInfo *ortmemoryinfo,
       OrtAllocator *ort_allocator,
@@ -496,7 +487,7 @@ namespace BeamSearchCpuDeviceHelper
       int gpt_subgraph_first_present_output_idx,
       const custombsop::IConsoleDumper *dumper);
 
-  OrtStatusPtr CreateInputs(OrtApi &api,
+  OrtStatusPtr CreateInputs(const OrtApi *api,
                             Ort::CustomOpApi &ort,
                             const OrtValue *original_input_ids,
                             int num_beams,
@@ -517,16 +508,16 @@ namespace BeamSearchCpuDeviceHelper
     const int64_t &sequence_length = original_input_ids_shape[1];
 
     OrtValue *input_ids;
-    api.CreateTensorAsOrtValue(ort_allocator, original_input_ids_shape.data(), original_input_ids_shape.size(),
-                               ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &input_ids);
+    api->CreateTensorAsOrtValue(ort_allocator, original_input_ids_shape.data(), original_input_ids_shape.size(),
+                                ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &input_ids);
 
     OrtValue *position_ids;
-    api.CreateTensorAsOrtValue(ort_allocator, original_input_ids_shape.data(), original_input_ids_shape.size(),
-                               ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &position_ids);
+    api->CreateTensorAsOrtValue(ort_allocator, original_input_ids_shape.data(), original_input_ids_shape.size(),
+                                ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &position_ids);
 
     OrtValue *attention_mask;
-    api.CreateTensorAsOrtValue(ort_allocator, original_input_ids_shape.data(), original_input_ids_shape.size(),
-                               ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &attention_mask);
+    api->CreateTensorAsOrtValue(ort_allocator, original_input_ids_shape.data(), original_input_ids_shape.size(),
+                                ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, &attention_mask);
 
     // Set attention mask to be 0 for pad tokens, and 1 for all other tokens.
     // Set position id to be 0 for pad tokens, and accumulated sum of mask in a batch for other tokens
@@ -561,8 +552,6 @@ namespace BeamSearchCpuDeviceHelper
 
       for (int k = 0; k < num_beams; k++)
       {
-        // TODO use safeint here
-        // sequence_lengths[SafeInt<gsl::index>(i) * num_beams + k] = abs_position;
         sequence_lengths[SafeInt<size_t>(i) * num_beams + k] = abs_position;
       }
     }
