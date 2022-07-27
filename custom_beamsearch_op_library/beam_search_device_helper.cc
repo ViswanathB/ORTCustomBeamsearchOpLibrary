@@ -402,6 +402,114 @@ namespace BeamSearchCpuDeviceHelper
     return nullptr;
   }
 
+template <typename T>
+OrtStatusPtr GreedySearchProcessLogits(
+    OrtKernelContext* context,
+    OrtApi &api,
+    Ort::CustomOpApi &ort,
+    const OrtValue& logits,                                     // logits output of subgraph
+    custombsop::IGreedySearchState<T>* greedy_state,            // state
+    custombsop::ISequences* sequences,                          // sequences
+    OrtAllocator* allocator,                                    // default allocator
+    void* thread_pool,                                          // thread pool (for CPU only)
+    custombsop::ILogitsProcessorList* logits_processors,        // logits processors
+    const custombsop::IBeamSearchParameters* parameters,        // parameters
+    int step,                                                   // iteration counter
+    void* stream,                                               // cuda stream (for CUDA only)
+    const custombsop::IConsoleDumper* dumper,                   // tensor dumper
+    std::unordered_map<std::string, OrtOp*> &ops_map)
+{
+  int batch_size = parameters->batch_size;
+  int vocab_size = parameters->vocab_size;
+
+  const T* logits_data = ort.GetTensorData<T>(&logits);
+
+  // Logits has shape (batch_size * num_beams, input_length, vocab_size),
+  // where input_length equals to parameters_->sequence_length for first subgraph call, and 1 for the remaining calls.
+  OrtTensorTypeAndShapeInfo* logits_data_info = ort.GetTensorTypeAndShape(&logits);
+  std::vector<int64_t> logits_shape = ort.GetTensorShape(logits_data_info);
+
+  CUSTOMOP_ENFORCE(logits_shape.size() == 3);
+  auto input_length = logits_shape[1];
+  auto logits_batch_size = logits_shape[0];
+
+#ifdef DEBUG_BEAM_SEARCH
+  std::cout<<"logits shape:"<<logits_shape[0]<<","<<logits_shape[1]<<","<<logits_shape[2]<<std::endl;
+#endif
+
+  // Get logits for the last token:
+  //    next_token_logits = logits[:, -1, :], and the result shape is (batch_size * num_beams, vocab_size)
+  // When input_length == 1, use logits directly in SoftmaxCPU below so it only need for input_length > 1.
+  gsl::span<T>& next_token_scores  = greedy_state->next_token_scores ;
+  const T* current_logits = logits_data + (input_length - 1) * vocab_size;
+  for (int i = 0; i < batch_size; i++) {
+    gsl::span<const T> source(current_logits, vocab_size);
+    gsl::span<T> target = next_token_scores .subspan(SafeInt<gsl::index>(i) * vocab_size, static_cast<gsl::index>(vocab_size));
+    gsl::copy(source, target);
+    current_logits += input_length * vocab_size;
+  }
+
+#ifdef DEBUG_BEAM_SEARCH
+  std::cout<<"Executing inside ProcessLogits"<<std::endl;
+  dumper->Print("next_token_scores ", next_token_scores .data(), batch_size, num_beams, vocab_size);
+#endif
+
+  // Apply all score processors that updates scores
+  logits_processors->Process(sequences, next_token_scores, step);
+
+#ifdef DEBUG_BEAM_SEARCH
+  dumper->Print("next_token_scores after logits processor", next_token_scores.data(), batch_size, num_beams, vocab_size);
+#endif
+
+   OrtMemoryInfo *ortmemoryinfo;
+  // Must be freed explicitly
+  api.CreateMemoryInfo("Cpu", OrtAllocatorType::OrtDeviceAllocator, 0, OrtMemType::OrtMemTypeCPU, &ortmemoryinfo);
+
+  // argmax
+  const int32_t top_k = static_cast<int32_t>(1);
+  OrtValue* topk_input;
+  std::vector<int64_t> softmax_input_dims{batch_size, vocab_size};
+  api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, next_token_scores.data(), size_t(4)*batch_size*vocab_size, softmax_input_dims.data(),
+      softmax_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &topk_input);
+
+  OrtValue* topk;
+  std::vector<int64_t> topk_input_dims{1};
+  std::vector<int64_t> topk_input_data{top_k};
+  api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_input_data.data(), size_t(8)*1, topk_input_dims.data(),
+      topk_input_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &topk);
+  const OrtValue* topk_inputs[2] = {reinterpret_cast<const OrtValue*>(topk_input), reinterpret_cast<const OrtValue*>(topk)};
+
+  std::vector<int64_t> topk_dims{batch_size, top_k};
+  OrtValue* topk_scores;
+  std::vector<float> topk_scores_data(batch_size*top_k, -1);
+  api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_scores_data.data(), size_t(4)*batch_size*top_k, topk_dims.data(),
+      topk_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &topk_scores);
+
+  OrtValue* topk_indices;
+  std::vector<int64_t> topk_indices_data(batch_size*top_k, -1);
+  api.CreateTensorWithDataAsOrtValue(ortmemoryinfo, topk_indices_data.data(), size_t(8)*batch_size*top_k, topk_dims.data(),
+      topk_dims.size(), ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &topk_indices);
+  OrtValue* topk_outputs[2] = {topk_scores, topk_indices};
+
+  OrtOp* topk_op = ops_map[std::string("topk")];
+  ort.InvokeOp(context, reinterpret_cast<const OrtOp*>(topk_op), topk_inputs, 2, topk_outputs, 2);
+
+#ifdef DEBUG_BEAM_SEARCH
+  dumper->Print("topk_scores", topk_scores_data.data(), batch_size, top_k);
+  dumper->Print("topk_indices", topk_indices_data.data(), batch_size, top_k);
+#endif
+
+  gsl::span<const int64_t> next_token_indices = gsl::make_span(topk_indices_data.data(), batch_size * top_k);
+  gsl::copy(next_token_indices, greedy_state->next_tokens_cpu);
+
+#ifdef DEBUG_BEAM_SEARCH
+  gsl::span<const int64_t> next_tokens(greedy_state->next_tokens_cpu.data(), greedy_state->next_tokens_cpu.size());
+  dumper->Print("next_tokens before scorer", next_tokens.data(), batch_size, top_k);
+#endif
+
+  return nullptr;
+}
+
   template <typename T>
   void InitBeamState(custombsop::IBeamSearchState<T> *beam_state,
                      custombsop::IBeamSearchCpuState *cpu_state,
@@ -452,6 +560,37 @@ namespace BeamSearchCpuDeviceHelper
     }
   }
 
+  template<typename T>
+  void InitGreedyState(
+      custombsop::IGreedySearchState<T>* greedy_state,
+      gsl::span<int32_t>& sequence_lengths,
+      int batch_size,
+      int sequence_length,
+      int max_length,
+      gsl::span<const int32_t> input_ids_in_cpu,
+      void* /*stream*/) {
+    memset(greedy_state->next_token_scores.data(), 0, greedy_state->next_token_scores.size_bytes());
+    memset(greedy_state->next_tokens.data(), 0, greedy_state->next_tokens.size_bytes());
+    memset(greedy_state->next_positions.data(), 0, greedy_state->next_positions.size_bytes());
+
+    gsl::copy(sequence_lengths, greedy_state->next_positions);
+
+    int* position_data_ptr = greedy_state->next_positions.data();
+    for (int i = 0; i < batch_size; i++) {
+      position_data_ptr[i] -= 1;
+    }
+
+    memset(greedy_state->sequences_space.data(), 0, greedy_state->sequences_space.size_bytes());
+
+    // Copy input_ids to sequences[0].
+    gsl::span<int32_t> sequences_0 = greedy_state->sequences_space;
+    for (int i = 0; i < batch_size; i++) {
+      for (int j = 0; j < sequence_length; j++) {
+        sequences_0[SafeInt<gsl::index>(i) * max_length + j] = static_cast<int32_t>(input_ids_in_cpu[SafeInt<gsl::index>(i) * sequence_length + j]);
+      }
+    }
+  }
+
   // Explicit template instantiations of functions
   template void InitBeamState<float>(
       custombsop::IBeamSearchState<float> *beam_state,
@@ -462,6 +601,15 @@ namespace BeamSearchCpuDeviceHelper
       gsl::span<const int32_t> input_ids_in_cpu,
       int sequence_length,
       int max_length);
+
+  template void InitGreedyState<float>(
+    custombsop::IGreedySearchState<float>* greedy_state,
+    gsl::span<int32_t>& sequence_lengths,
+    int batch_size,
+    int sequence_length,
+    int max_length,
+    gsl::span<const int32_t> input_ids_in_cpu,
+    void* stream);
 
   template OrtStatusPtr ProcessLogits<float>(
       OrtKernelContext *context,
@@ -478,6 +626,22 @@ namespace BeamSearchCpuDeviceHelper
       int step,                                            // iteration counter
       const custombsop::IConsoleDumper *dumper,            // tensor dumper
       std::unordered_map<std::string, OrtOp *> &ops_map);
+
+  template OrtStatusPtr GreedySearchProcessLogits<float>(
+    OrtKernelContext* context,
+    OrtApi &api,
+    Ort::CustomOpApi &ort,
+    const OrtValue& logits,                                     // logits output of subgraph
+    custombsop::IGreedySearchState<float>* greedy_state,            // state
+    custombsop::ISequences* sequences,                          // sequences
+    OrtAllocator* allocator,                                    // default allocator
+    void* thread_pool,                                          // thread pool (for CPU only)
+    custombsop::ILogitsProcessorList* logits_processors,        // logits processors
+    const custombsop::IBeamSearchParameters* parameters,        // parameters
+    int step,                                                   // iteration counter
+    void* stream,                                               // cuda stream (for CUDA only)
+    const custombsop::IConsoleDumper* dumper,                   // tensor dumper
+    std::unordered_map<std::string, OrtOp*> &ops_map);
 
   template OrtStatusPtr UpdateFeeds<float>(
       OrtApi &api,

@@ -80,4 +80,16 @@ namespace custombsop
     current_sequences_buffer = 1 - current_sequences_buffer;
   }
 
+  void Sequences::AppendNextTokenToSequences(
+    gsl::span<int32_t>& next_tokens) {
+    gsl::span<int32_t> output(sequences[current_sequences_buffer].data(), sequences[current_sequences_buffer].size());
+
+    // Append next token to each sequence.
+    for (int i = 0; i < batch_beam_size_; i++) {
+      output[SafeInt<size_t>(i) * max_length_ + current_length_] = next_tokens[i];
+    }
+
+    ++current_length_;
+  }
+
 } // namespace custombsop

@@ -67,12 +67,12 @@ def parse_arguments():
         nargs=1,
         type=str,
         default=
-        'https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.Gpu/1.11.0',
+        'https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.Gpu/1.12.0',
         help="Onnxruntime release nuget package download link.")
 
     args = parser.parse_args()
     return args
-    
+
 
 
 def main():

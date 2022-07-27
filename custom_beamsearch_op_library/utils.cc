@@ -80,4 +80,5 @@ gsl::span<T> AllocateBufferUniquePtr(OrtAllocator *allocator,
 
 template gsl::span<float> AllocateBufferUniquePtr(OrtAllocator *allocator, BufferUniquePtr &buffer, size_t elements, bool fill, float fill_value);
 template gsl::span<int> AllocateBufferUniquePtr(OrtAllocator *allocator, BufferUniquePtr &buffer, size_t elements, bool fill, int fill_value);
+template gsl::span<int64_t> AllocateBufferUniquePtr(OrtAllocator *allocator, BufferUniquePtr &buffer, size_t elements, bool fill, int64_t fill_value);
 template gsl::span<bool> AllocateBufferUniquePtr(OrtAllocator *allocator, BufferUniquePtr &buffer, size_t elements, bool fill, bool fill_value);

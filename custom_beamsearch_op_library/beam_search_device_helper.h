@@ -37,6 +37,23 @@ namespace BeamSearchDeviceHelper
         std::unordered_map<std::string, OrtOp *> &ops_map)>;
 
     template <typename T>
+    using GreedySearchProcessLogitsFunc = std::function<OrtStatusPtr(
+        OrtKernelContext* context,
+        OrtApi &api,
+        Ort::CustomOpApi &ort,
+        const OrtValue& logits,                                     // logits output of subgraph
+        custombsop::IGreedySearchState<T>* greedy_state,            // state
+        custombsop::ISequences* sequences,                          // sequences
+        OrtAllocator* allocator,                                    // default allocator
+        void* thread_pool,                                          // thread pool (for CPU only)
+        custombsop::ILogitsProcessorList* logits_processors,        // logits processors
+        const custombsop::IBeamSearchParameters* parameters,        // parameters
+        int step,                                                   // iteration counter
+        void* stream,                                               // cuda stream (for CUDA only)
+        const custombsop::IConsoleDumper* dumper,                   // tensor dumper
+        std::unordered_map<std::string, OrtOp*> &ops_map)>;
+
+    template <typename T>
     using UpdateFeedsFunc = std::function<OrtStatusPtr(
         OrtApi &api,
         Ort::CustomOpApi &ort,
@@ -71,6 +88,16 @@ namespace BeamSearchDeviceHelper
         gsl::span<const int32_t> input_ids_in_cpu,
         int sequence_length,
         int max_length)>;
+
+    template <typename T>
+    using InitGreedyStateFunc = std::function<void(
+        custombsop::IGreedySearchState<T>* greedy_state,
+        gsl::span<int32_t>& sequence_lengths,
+        int batch_size,
+        int sequence_length,
+        int max_length,
+        gsl::span<const int32_t> input_ids_in_cpu,
+        void* stream)>;
 }
 
 // These are CPU specific device helper implementations
@@ -105,6 +132,23 @@ namespace BeamSearchCpuDeviceHelper
         const custombsop::IConsoleDumper *dumper,            // tensor dumper
         std::unordered_map<std::string, OrtOp *> &ops_map);
 
+    template <typename T>
+    OrtStatusPtr GreedySearchProcessLogits(
+        OrtKernelContext* context,
+        OrtApi &api,
+        Ort::CustomOpApi &ort,
+        const OrtValue& logits,                                     // logits output of subgraph
+        custombsop::IGreedySearchState<T>* greedy_state,            // state
+        custombsop::ISequences* sequences,                          // sequences
+        OrtAllocator* allocator,                                    // default allocator
+        void* thread_pool,                                          // thread pool (for CPU only)
+        custombsop::ILogitsProcessorList* logits_processors,        // logits processors
+        const custombsop::IBeamSearchParameters* parameters,        // parameters
+        int step,                                                   // iteration counter
+        void* stream,                                               // cuda stream (for CUDA only)
+        const custombsop::IConsoleDumper* dumper,                   // tensor dumper
+        std::unordered_map<std::string, OrtOp*> &ops_map);
+
     OrtStatusPtr AddToFeeds(
         OrtValue *input_ids,
         OrtValue *position_ids,
@@ -138,4 +182,14 @@ namespace BeamSearchCpuDeviceHelper
                        gsl::span<const int32_t> input_ids_in_cpu,
                        int sequence_length,
                        int max_length);
+
+    template <typename T>
+    void InitGreedyState(
+        custombsop::IGreedySearchState<T>* greedy_state,
+        gsl::span<int32_t>& sequence_lengths,
+        int batch_size,
+        int sequence_length,
+        int max_length,
+        gsl::span<const int32_t> input_ids_in_cpu,
+        void* stream);
 }
