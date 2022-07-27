@@ -10,14 +10,13 @@
 #include "json.hpp"
 using json = nlohmann::json;
 
-#include "beam_search.h"
 #ifdef _WIN32
 #include <Windows.h>
 #else
 #include <unistd.h>
 #endif
 
-#include "beam_search_parameters.h"
+#include "beam_search.h"
 
 static const char *c_OpDomain = "test.beamsearchop";
 

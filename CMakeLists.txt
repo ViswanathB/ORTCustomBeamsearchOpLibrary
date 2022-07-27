@@ -30,28 +30,18 @@ file(GLOB CUSTOMBEAMSEARCHOPLIB_SRC
     "${CUSTOMBEAMSEARCHOPLIB_ROOT}/*.def"
 )
 
+file(GLOB BEAMSEARCHOP_SRC
+    "${CUSTOMBEAMSEARCHOPLIB_ROOT}/custombsop/*.h"
+    "${CUSTOMBEAMSEARCHOPLIB_ROOT}/custombsop/*.cc"
+)
+
 file(COPY ${ORT_HEADER_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 file(COPY ${CUSTOMBEAMSEARCHOPLIB_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+file(COPY ${BEAMSEARCHOP_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 file(GLOB CUSTOMBEAMSEARCHOPCPUIMPL_SRC
-    "${CMAKE_CURRENT_BINARY_DIR}/utils.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/utils.cc"
-    "${CMAKE_CURRENT_BINARY_DIR}/json.hpp"
-    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_shared.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_parameters.cc"
-    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_scorer.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_scorer.cc"
-    "${CMAKE_CURRENT_BINARY_DIR}/sequences.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/sequences.cc"
-    "${CMAKE_CURRENT_BINARY_DIR}/dump_tensor.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/dump_tensor.cc"
-    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/beam_search_device_helper.cc"
-    "${CMAKE_CURRENT_BINARY_DIR}/beam_search.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/beam_search.cc"
-    "${CMAKE_CURRENT_BINARY_DIR}/logits_processor.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/logits_processor.cc"
+    "${CMAKE_CURRENT_BINARY_DIR}/*.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/*.cc"
 )
 
 include(FetchContent)
