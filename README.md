@@ -1,12 +1,12 @@
 # ORTCustomBeamsearchOpLibrary
 
-##Prerequisites
+## Prerequisites
 Minimum requirements:
 1. Windows SDK version 10.0.19041.0+
 2. cmake, install cmake from https://cmake.org/install/
 3. Python3 for using create_beam_search.py
 
-###Note:
+### Note:
 It contains a library file json.hpp from https://github.com/nlohmann/json/releases/tag/v3.10.5 for json processing and will be updated as needed.
 
 
