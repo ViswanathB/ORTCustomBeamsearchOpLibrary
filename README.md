@@ -11,7 +11,7 @@ It contains a library file json.hpp from https://github.com/nlohmann/json/releas
 
 
 ## Introduction
-This is an effort to provide equivalent of https://github.com/microsoft/onnxruntime/blob/master/docs/ContribOperators.md#com.microsoft.BeamSearch for customers that need custom beam search.
+This is an effort to provide equivalent of https://github.com/microsoft/onnxruntime/blob/master/docs/ContribOperators.md#com.microsoft.BeamSearch for customers that need custom beam search. Thanks to [Tianlei Wu](https://github.com/tianleiwu) for his contributions who wrote most of this, this custom op borrows lot of code and design.
 
 This currently only supports decoder models. [Create beam search script](./create_beam_search.py)(usage is documented within the script) generates config.json required to run the model.
 
