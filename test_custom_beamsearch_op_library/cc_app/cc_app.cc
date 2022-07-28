@@ -20,48 +20,26 @@
 
 using namespace std;
 
-void RunCustomOpBeamsearchTestModel(std::wstring &wide_string, const char *custom_op_library_filename, const char *test_data_file, const char *result_file)
+int num_words = 6;
+int batch_size = 1;
+int vocab_size = 50263;
+int num_return_sequences = 1;
+
+void RunTest(Ort::Session &session,
+             fstream &fileInStream,
+             fstream &fileOutStream,
+             std::vector<const char *> &input_names,
+             std::vector<const char *> &output_names)
 {
-  int num_words = 6;
-  int batch_size = 1;
-  int num_return_sequences = 1;
-
-  Ort::Env ort_env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING, "test custom op");
-
-  Ort::SessionOptions session_options = Ort::SessionOptions();
-
-  void *handle = nullptr;
-  Ort::GetApi().RegisterCustomOpsLibrary((OrtSessionOptions *)session_options, custom_op_library_filename, &handle);
-  Ort::Session session(ort_env, wide_string.c_str(), session_options);
-
   Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
   std::vector<Ort::Value> ort_inputs;
-  std::vector<const char *> input_names;
-
-  // input_ids
-  input_names.emplace_back("input_ids");
-  input_names.emplace_back("max_length");
-  input_names.emplace_back("vocab_mask");
-  input_names.emplace_back("prefix_vocab_mask");
-
-  std::vector<const char *> output_names;
-  output_names.emplace_back("sequences");
-  output_names.emplace_back("sequences_scores");
-
-  int query_counter = 0;
   int max_length = 0;
-
-  fstream fileStream;
-  fileStream.open(test_data_file);
-
-  fstream fileOutStream;
-  fileOutStream.open(result_file, fstream::out);
 
   while (1)
   {
     std::string line;
-    std::getline(fileStream, line);
+    std::getline(fileInStream, line);
 
     // Total queries in the file are hundred
     if (line.length() == 0)
@@ -71,8 +49,6 @@ void RunCustomOpBeamsearchTestModel(std::wstring &wide_string, const char *custo
     std::stringstream lineStream(line);
     int input_count;
     lineStream >> input_count;
-
-    query_counter++;
 
     std::vector<int> input_ids;
     int input_id;
@@ -94,26 +70,26 @@ void RunCustomOpBeamsearchTestModel(std::wstring &wide_string, const char *custo
                                                                     ml.data(), ml.size(),
                                                                     ml_shape.data(), ml_shape.size())));
 
-    std::vector<int> vm_data(50263, 1);
-    std::vector<int64_t> vm_shape{50263};
+    std::vector<int> vm_data(vocab_size, 1);
+    std::vector<int64_t> vm_shape{vocab_size};
     ort_inputs.emplace_back(std::move(Ort::Value::CreateTensor<int>(memory_info,
                                                                     vm_data.data(), vm_data.size(),
                                                                     vm_shape.data(), vm_shape.size())));
 
-    std::getline(fileStream, line);
+    std::getline(fileInStream, line);
     std::stringstream lineStream_pvm(line);
 
     int pvm_count;
     lineStream_pvm >> pvm_count;
 
-    std::vector<int> pvm_data(batch_size * 50263, 0);
+    std::vector<int> pvm_data(batch_size * vocab_size, 0);
     int pvm_id;
     for (int i = 0; i < pvm_count; i++)
     {
       lineStream_pvm >> pvm_id;
       pvm_data[pvm_id] = 1;
     }
-    std::vector<int64_t> pvm_shape{batch_size, 50263};
+    std::vector<int64_t> pvm_shape{batch_size, vocab_size};
     ort_inputs.emplace_back(std::move(Ort::Value::CreateTensor<int>(memory_info,
                                                                     pvm_data.data(), pvm_data.size(),
                                                                     pvm_shape.data(), pvm_shape.size())));
@@ -136,8 +112,37 @@ void RunCustomOpBeamsearchTestModel(std::wstring &wide_string, const char *custo
 
     ort_inputs.clear();
   }
+}
 
-  fileStream.close();
+void RunCustomOpBeamsearchTestModel(std::wstring &wide_string, const char *custom_op_library_filename, const char *test_data_file, const char *result_file)
+{
+  Ort::Env ort_env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING, "test custom op");
+
+  Ort::SessionOptions session_options = Ort::SessionOptions();
+
+  void *handle = nullptr;
+  Ort::GetApi().RegisterCustomOpsLibrary((OrtSessionOptions *)session_options, custom_op_library_filename, &handle);
+  Ort::Session session(ort_env, wide_string.c_str(), session_options);
+
+  std::vector<const char *> input_names;
+  input_names.emplace_back("input_ids");
+  input_names.emplace_back("max_length");
+  input_names.emplace_back("vocab_mask");
+  input_names.emplace_back("prefix_vocab_mask");
+
+  std::vector<const char *> output_names;
+  output_names.emplace_back("sequences");
+  output_names.emplace_back("sequences_scores");
+
+  fstream fileInStream;
+  fileInStream.open(test_data_file);
+
+  fstream fileOutStream;
+  fileOutStream.open(result_file, fstream::out);
+
+  RunTest(session, fileInStream, fileOutStream, input_names, output_names);
+
+  fileInStream.close();
   fileOutStream.close();
 
   std::cout << "THE END" << std::endl;
