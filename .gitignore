@@ -46,3 +46,5 @@ CMakeCache.txt
 .vscode
 
 temptest/*
+result*
+result/*

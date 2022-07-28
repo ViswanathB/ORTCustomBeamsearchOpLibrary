@@ -10,13 +10,14 @@ import subprocess
 
 
 class BuildHelper():
-    def __init__(self, build_path, package_url):
+    def __init__(self, build_path, test_build_path, package_url):
         self.SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
         self.BUILD_DIR = os.path.join(self.SCRIPT_DIR, build_path)
+        self.TEST_BUILD_DIR = os.path.join(self.SCRIPT_DIR, test_build_path)
         self.PACKAGE_DIR = os.path.join(self.BUILD_DIR, "ort_package")
         self.PACKAGE_PATH = os.path.join(self.PACKAGE_DIR, "ort.zip")
 
-        self.make_directory(self.BUILD_DIR, self.PACKAGE_DIR)
+        self.make_directory(self.BUILD_DIR, self.PACKAGE_DIR, self.TEST_BUILD_DIR)
         self.download_package_from_url(package_url)
         self.execute_cmake()
 
@@ -36,6 +37,9 @@ class BuildHelper():
         subprocess.run([cmake_path, ".."], cwd=self.BUILD_DIR)
         subprocess.run([cmake_path, "--build", "."], cwd=self.BUILD_DIR)
 
+        subprocess.run([cmake_path, ".."], cwd=self.TEST_BUILD_DIR)
+        subprocess.run([cmake_path, "--build", "."], cwd=self.TEST_BUILD_DIR)
+
     def make_directory(self, *paths):
         [Path(path).mkdir(parents=True, exist_ok=True) for path in paths]
 
@@ -49,7 +53,6 @@ class BuildHelper():
         open(self.PACKAGE_PATH, 'wb').write(r.content)
         shutil.unpack_archive(self.PACKAGE_PATH, self.PACKAGE_DIR)
 
-
 def parse_arguments():
     parser = argparse.ArgumentParser()
 
@@ -62,23 +65,28 @@ def parse_arguments():
         help="Specify build path.")
 
     parser.add_argument(
+        "--test_build_path",
+        required=False,
+        nargs=1,
+        type=str,
+        default='.\\test_custom_beamsearch_op_library\\build',
+        help="Specify build path.")
+
+    parser.add_argument(
         "--package_url",
         required=False,
         nargs=1,
         type=str,
         default=
-        'https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.Gpu/1.11.0',
+        'https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.Gpu/1.12.0',
         help="Onnxruntime release nuget package download link.")
 
     args = parser.parse_args()
     return args
-    
-
 
 def main():
     args = parse_arguments()
-    BuildHelper(args.build_path, args.package_url)
-
+    BuildHelper(args.build_path, args.test_build_path, args.package_url)
 
 if __name__ == "__main__":
     main()

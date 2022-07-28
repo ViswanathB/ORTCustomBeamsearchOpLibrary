@@ -182,8 +182,7 @@ def make_custombeamsearchop(args):
     if not os.path.exists(args.input_model_path):
         raise Exception(f"Input path doesn't exist")
 
-    #Note: external data is not supported now, like loading weights
-    #seperately
+    #Note: external data is not supported now, like loading weights seperately
     model = onnx.load_model(args.input_model_path)
     verify_gpt2_decoder_graph(model.graph)
 

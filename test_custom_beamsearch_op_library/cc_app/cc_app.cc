@@ -10,7 +10,6 @@
 #include "onnxruntime_cxx_api.h"
 
 #include <assert.h>
-#include "run_custom_bs.h"
 
 #define TEST_QUERIES 1
 #define CUSTOM_OP 1

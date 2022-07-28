@@ -10,18 +10,11 @@ set(CUSTOMBEAMSEARCHOPLIB_ROOT ${PROJECT_SOURCE_DIR}/custom_beamsearch_op_librar
 set(ORTPACKAGE_ROOT ${CMAKE_CURRENT_BINARY_DIR}/ort_package)
 set(ORTPACKAGE_INCLUDE ${ORTPACKAGE_ROOT}/build/native/include)
 
-set(LOCAL_HEADER_SOURCE
-    "D:\\ai\\onnxruntime\\include\\onnxruntime\\core\\session\\")
-set(INCLUDE_SRC
-    "${LOCAL_HEADER_SOURCE}/onnxruntime_c_api.h"
-    "${LOCAL_HEADER_SOURCE}/onnxruntime_cxx_api.h"
-    "${LOCAL_HEADER_SOURCE}/onnxruntime_cxx_inline.h")
-file(COPY ${INCLUDE_SRC} DESTINATION ${ORTPACKAGE_INCLUDE})
-
 set(ORT_HEADER_SRC
     "${ORTPACKAGE_INCLUDE}/onnxruntime_c_api.h"
     "${ORTPACKAGE_INCLUDE}/onnxruntime_cxx_api.h"
     "${ORTPACKAGE_INCLUDE}/onnxruntime_cxx_inline.h")
+file(COPY ${INCLUDE_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 file(GLOB CUSTOMBEAMSEARCHOPLIB_SRC
     "${CUSTOMBEAMSEARCHOPLIB_ROOT}/*.h"

@@ -41,7 +41,8 @@ Use above command to build the custom op and test application as following:
 A [test application](./test_custom_beamsearch_op_library/) is provided in the repo. It is build automatically with no additional steps. Exe is build into "./test_custom_beamsearch_op_library/build/Debug/". It tests a simple case of batch_size = 1 and num_return_sequences = 1. Testing steps:
 
 ```
- cc_app.exe <decoder_beamsearch.onnx> <custom beam search op dll path> <test_data_file> <result_file>
+ >cd test_custom_beamsearch_op_library\build\Debug
+ >.\cc_app.exe <decoder_beamsearch.onnx> <custom beam search op dll path> <test_data_file> <result_file>
 ```
 
 1. decoder_beamsearch.onnx : post converted model path. The post converted model path looks like:
