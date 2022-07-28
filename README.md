@@ -17,9 +17,18 @@ This currently only supports decoder models. [Create beam search script](./creat
 
 Also, only the following parameters are provided as inputs to the post converted model: input ids, maximum length, vocab mask and prefix vocab mask. Other parameters needed for beam search are supplied from config.json that is generated during conversion. These are less likely to change duing deployment.
 
+## Create custom op beam search for a decoder model
+    
+Custom op beam search for a decoder model can be created using:
 
-## Build 
-[python build file](build.py) is used the build the dll.
+    ```
+    python create_beam_search.py -i decoder.onnx --vocab_size 50263 -o decoder_beamsearch.onnx --eos_token_id 50256 --pad_token_id 50262
+    ```
+
+There are some non mandatory options which can used or extended as needed.
+
+## Build custom op
+[python build file](build.py) is used to build the dll.
 
     ```
     python build.py
@@ -27,12 +36,9 @@ Also, only the following parameters are provided as inputs to the post converted
 
 ### Run test application with a converted model
 
-To build the custom op and test application do the following:
+Use above command to build the custom op and test application as following:
 
-```python build.py
-```
-
-A [test application](./test_custom_beamsearch_op_library/) is provided in the repo. It is build automatically with the build.py with no additional steps. Exe is build into "./test_custom_beamsearch_op_library/build/Debug/". It has a simple case of batch_size = 1 and num_return_sequences = 1. To test a model, use the following command with exe.
+A [test application](./test_custom_beamsearch_op_library/) is provided in the repo. It is build automatically with no additional steps. Exe is build into "./test_custom_beamsearch_op_library/build/Debug/". It tests a simple case of batch_size = 1 and num_return_sequences = 1. Testing steps:
 
 ```
  cc_app.exe <decoder_beamsearch.onnx> <custom beam search op dll path> <test_data_file> <result_file>
@@ -60,8 +66,8 @@ A [test application](./test_custom_beamsearch_op_library/) is provided in the re
 4. result_file: Where should the result be written. These are sequences post beam search
 
 
-### Issues:
+### Active Issues:
 1. Python bind issue. the global env variable in pybind and C++ is different. When someone is trying to create an external session and an internal session, both have to share the same env. Current Onnxruntime code doesn't provide a way for this and thus, usage is limited to C++.
 
-### Follow up, TODO
+### Follow up, future releases
 1. Output scores is not supported as 3rd output now, this should be added as contrib op supports this.
