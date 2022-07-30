@@ -1,21 +1,31 @@
 # ORTCustomBeamsearchOpLibrary
 
-## Prerequisites
-Minimum requirements:
-1. Windows SDK version 10.0.19041.0+
-2. cmake, install cmake from https://cmake.org/install/
-3. Python3 for using create_beam_search.py
-
-### Note:
-It contains a library file json.hpp from https://github.com/nlohmann/json/releases/tag/v3.10.5 for json processing and will be updated as needed.
-
-
 ## Introduction
-This is an effort to provide equivalent of https://github.com/microsoft/onnxruntime/blob/master/docs/ContribOperators.md#com.microsoft.BeamSearch for customers that need custom beam search. Thanks to [Tianlei Wu](https://github.com/tianleiwu) for his contributions who wrote most of this, this custom op borrows lot of code and design.
+This is an effort to provide equivalent of [Onnxruntime Beam search contrib op](https://github.com/microsoft/onnxruntime/blob/master/docs/ContribOperators.md#com.microsoft.BeamSearch) for customers that need custom beam search. Thanks to [Tianlei Wu](https://github.com/tianleiwu) for his contributions who wrote most of contrib op. Custom op borrows lot of code and design from it. This repo doesn't provide any inference on an onnx model by itself but would produce a dll that has to be loaded with an inference session created by [ONNX runtime](https://github.com/microsoft/onnxruntime). An C++ working example is included in the repo on how this can be achieved.
 
 This currently only supports decoder models. [Create beam search script](./create_beam_search.py)(usage is documented within the script) generates config.json required to run the model.
 
 Also, only the following parameters are provided as inputs to the post converted model: input ids, maximum length, vocab mask and prefix vocab mask. Other parameters needed for beam search are supplied from config.json that is generated during conversion. These are less likely to change duing deployment.
+
+## Prerequisites
+Minimum requirements:
+1. Windows SDK version 10.0.19041.0+ (https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/)
+2. cmake (https://cmake.org/install/).
+3. Python3 (https://www.python.org/downloads/).
+4. C++ compiler.
+
+Make sure during installation, cmake, python3,.. be added to path, or these should be explicitly added. cmake needs to find cxx compiler too, make sure it can find it, add it to the path. In order to isolate environment for the build, a venv is used. In a directory where you can clone the repo, do the following:
+
+    ```Powershell
+        >git clone https://github.com/viboga/ORTCustomBeamsearchOpLibrary
+        >python -m venv env4custombs
+        >.\env4custombs\Scripts\activate.ps1
+        >pip install requests, onnx
+    ```
+
+
+### Note:
+It contains a library file json.hpp from https://github.com/nlohmann/json/releases/tag/v3.10.5 for json processing and will be updated as needed.
 
 ## Create custom op beam search for a decoder model
     
@@ -25,7 +35,7 @@ Custom op beam search for a decoder model can be created using:
     python create_beam_search.py -i decoder.onnx --vocab_size 50263 -o decoder_beamsearch.onnx --eos_token_id 50256 --pad_token_id 50262
     ```
 
-There are some non mandatory options which can used or extended as needed.
+There are some non mandatory options which can used or extended as needed. Refer [create_beam_search.py](./create_beam_search.py)
 
 ## Build custom op
 [python build file](build.py) is used to build the dll.
@@ -33,6 +43,8 @@ There are some non mandatory options which can used or extended as needed.
     ```
     python build.py
     ```
+
+Script downloads onnxruntime 12.0 release package and copies the files to corresponding build directories for [custom_beam_search_op_library](./custom_beamsearch_op_library/) and [test_custom_beamsearch_op_library](./test_custom_beamsearch_op_library/).
 
 ### Run test application with a converted model
 

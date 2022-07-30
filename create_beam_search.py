@@ -2,7 +2,7 @@ import argparse
 import json
 from typing import List, Optional
 import onnx
-from onnx import helper, TensorProto
+from onnx import TensorProto
 import os
 import shutil
 
